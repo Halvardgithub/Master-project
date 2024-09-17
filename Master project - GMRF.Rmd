@@ -1,0 +1,112 @@
+---
+title: "Master project"
+author: "Halvard"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Simulation of a GMRF - random walks
+
+
+## Random walk 1
+For the random walk 1 we have a diagonal precision matrix with $2$ on the diagonal and $-1$ on the neighboring diagonals. The first and last elements on the diagonal are set to $1$, so all rows sum to $0$. $k$ is some scale constant. We also assume a zero mean, but adding a different mean is just a location shift.
+
+```{r}
+#Creating the structure matrix
+n = 4
+R <- diag(2, n)
+R[abs(row(R) - col(R)) == 1] <- -1
+R[1, 1] <- 1
+R[n, n] <- 1
+
+R
+
+k <- 1 #A constant connected top variance
+Q <- k*R
+mu <- rep(0, n)
+```
+
+Eigenvalues of R:
+$$
+\lambda_i = 2 - 2\text{cos}(\pi (i-1)/n), \quad i = 1, ..., n
+$$
+Tried sampling with Algorithm 3.1, does not appear to work as expected. Maybe its missing some constraint, like the sum of $x$ equals $0$, or something with my implementation.
+```{r}
+# Eigenvalues
+eigVecs <- eigen(Q, symmetric=TRUE) #Finds the eigenvectors
+
+eigVals <- rep(0, n)
+for(i in 2:n){
+  eigVals[i] <- (2 - 2*cos(pi*(i - 1)/n))*k #Finds the eigenvalues
+}
+
+EVInv <- rev(sqrt(1/eigVals))  #Invert and square root for scaling
+
+z <- rnorm(n-1) #Standard normal sample
+y <- rep(0, n-1)
+for(i in 1:(n-1)){
+  y[i] <- z[i] * EVInv[i] #Computes the ys
+}
+x <- rep(0, n)
+for(i in 1:(n-1)){
+  x <- x + y[i]*eigVecs$vectors[1+i, 1:n] 
+}
+
+
+```
+
+```{r}
+plot(1:n, x)
+```
+
+Another approach is to mimic the algorithms from the earlier sections, however our Q is singular
+```{r}
+A <- eigVecs$vectors[1, 1:n]
+Q_inv <- solve(Q)
+det(Q)
+
+Q_new <- Q + A%*%t(A)
+
+L <- t(chol(Q_new)) #The lower triangle cholesky decomp.
+z <- rnorm(n)
+v <- solve(t(L), z)
+
+
+
+Q_inv <- solve(Q_new)
+det(Q_new)
+
+x_adj <- x - Q_inv%*%A *solve(t(A)%*%Q_inv%*%A)*(t(A)%*%x)
+```
+
+
+## Basic random walk
+The easiest way to simulate a random walk is through the assumption of independent normal distributed increments. We know that '
+$$
+x_{i+1} | x_1, ..., x_i, \sigma \sim N(x_i, \sigma^2)
+$$
+Thus, all we need to do is sample from the standard normal, scale them by $\sigma$ and add them sequentially. Standard to assert that $x_0 = 0$.
+
+```{r}
+n <- 100
+sigma <- 2
+xt <- rep(0, n)
+z <- sigma * rnorm(n-1)
+for(i in 2:n){
+  xt[i] <- xt[i-1] + z[i-1]
+}
+
+t <- 1:n
+plot(t, xt)
+
+
+```
+
+
+
+
+
