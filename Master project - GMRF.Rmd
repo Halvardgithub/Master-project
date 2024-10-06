@@ -84,26 +84,23 @@ x_adj <- x - Q_inv%*%A *solve(t(A)%*%Q_inv%*%A)*(t(A)%*%x)
 ```
 
 
+
+
+
 ## Basic random walk
 The easiest way to simulate a random walk is through the assumption of independent normal distributed increments. We know that '
 $$
-x_{i+1} | x_1, ..., x_i, \sigma \sim N(x_i, \sigma^2)
+x_{t+1} | x_1, ..., x_t, \sigma = x_{t+1}|x_t, \sigma \sim N(x_t, \sigma^2)
 $$
 Thus, all we need to do is sample from the standard normal, scale them by $\sigma$ and add them sequentially. Standard to assert that $x_0 = 0$.
 
 
 ```{r}
 library(ggplot2)
-n <- 100
-sigma <- 2
-xt <- rep(0, n)
-z <- sigma * rnorm(n-1)
-for(i in 2:n){
-  xt[i] <- xt[i-1] + z[i-1]
-}
+```
 
-t <- 1:n
-plot(t, xt)
+```{r}
+library(tidyr)  # For pivot_longer
 
 N <- 10
 n <- 100
@@ -111,28 +108,81 @@ sigma <- 2
 beta <- 1
 
 df <- data.frame(matrix(NA, nrow = n, ncol = N))
+set.seed(0)
 for (i in 1:N){
   xt <- rep(0, n)
   z <- sigma * rnorm(n-1)
   for(j in 2:n){
-    xt[j] <- xt[j-1] + z[j-1]
+    xt[j] <- beta*xt[j-1] + z[j-1]
   }
   df[, i] <- xt
 }
 
-set.seed(0)
-t <- 1:100
+df$t <- 1:nrow(df)  # Create a time index from 1 to n
 
-ggplot(df, aes(x=t)) + 
-  geom_line(aes(y = X1)) + geom_line(aes(y = X2)) +
-  geom_line(aes(y = X3)) + geom_line(aes(y = X4)) +
-  geom_line(aes(y = X5)) + geom_line(aes(y = X6)) +
-  geom_line(aes(y = X7)) + geom_line(aes(y = X8)) +
-  geom_line(aes(y = X9)) + geom_line(aes(y = X10)) 
+# Reshape the dataframe to long format
+df_long <- df %>% pivot_longer(cols = starts_with("X"), names_to = "variable", values_to = "value")
+
+# Plot all lines using ggplot
+RW1_plot <- ggplot(df_long, aes(x = t, y = value, color = variable)) +
+  geom_line() +
+  labs(title = "RW1 with n=100", x = "Time", y = "y") +
+  theme(legend.position = "none")
 
 ```
 
 
+## Random walk 2
+
+
+$$
+x_t - 2x_{t+1} + x_{t+2} \sim N(0, \sigma^2)\\
+x_{t+2} \sim N(2x_{t+1} - x_t, \sigma^2) \\
+x_{t+2} = 2x_{t+1} - x_t + \epsilon_t \\
+\epsilon_t \sim N(0, \sigma^2)
+$$
+
+```{r}
+#RW2
+N <- 10
+n <- 100
+sigma <- 2
+beta1 <- 2
+beta2 <- -1
+
+df2 <- data.frame(matrix(NA, nrow = n, ncol = N))
+set.seed(0)
+for (i in 1:N){
+  xt <- rep(0, n)
+  z <- sigma * rnorm(n-1)
+  for(j in 3:n){
+    xt[j] <- beta1*xt[j-1] + beta2*xt[j-2] + z[j-1]
+  }
+  df2[, i] <- xt
+}
+
+df2$t <- 1:nrow(df2)  # Create a time index from 1 to n
+
+# Reshape the dataframe to long format
+df2_long <- df2 %>% pivot_longer(cols = starts_with("X"), names_to = "variable", values_to = "value")
+
+# Plot all lines using ggplot
+RW2_plot <- ggplot(df2_long, aes(x = t, y = value, color = variable)) +
+  geom_line() +
+  labs(title = "RW2 with n=100", x = "Time", y = "y") +
+  theme(legend.position = "none")
+
+
+```
+
+
+Visualize the plots.
+```{r}
+library("ggpubr")
+RW_figure <- ggarrange(RW1_plot, RW2_plot, ncol = 1)
+
+RW_figure
+```
 
 
 
