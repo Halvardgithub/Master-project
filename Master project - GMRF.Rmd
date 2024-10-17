@@ -225,8 +225,266 @@ rates
 
 The code above seems to work fine, but should possibly tune some of the parameters, or maybe the plot of the ys should look insane. 
 
+## Fitting the model with INLA
+Also need some criteria to compare the success of the models.
+
+```{r}
+library(INLA)
+```
+
+The following is code from a PowerPoint on Inla by Andrea Riebler, as well as some additional testing and modification by myself.
+
+A simple linear regression
+```{r}
+# Generate data
+x = sort(runif(100))
+y = 1 + 2*x + rnorm(n = 100, sd = 0.1)
+
+# Run inla
+formula = y ~ 1 + x
+result = inla( formula ,
+  data = list(x = x , y = y) ,
+  family = " gaussian ")
+
+# Get summary
+summary ( result )
+plot(result)
+
+m = result$marginals.fixed[[1]]
+plot(m)
+plot(inla.smarginal(m))
+```
+
+Adding a random effect
+```{r}
+# Generate AR (1) sequence
+t = 1:100
+ar = rep(0, 100)
+for(i in 2:100)
+  ar[i] = 0.8 *ar[i -1]+ rnorm(n = 1, sd = 0.1)
+
+# Generate data with AR (1) component
+x = runif(100)
+y = 1 + 2*x + ar + rnorm(n = 100 , sd = 0.1)
+
+# Run inla
+formula = y ~ 1 + x + f(t, model="ar1")
+result = inla(formula,
+  data = list(x = x, y = y, t = t) ,
+  family = "gaussian")
+
+# Get summary
+summary(result)
+```
+
+Prediction for an unobserved location
+```{r}
+# Add new location
+x = c(x , 0.3)
+t = c(t, 101)
+y = c(y , NA)
+
+# Re - compute
+result.pred = inla(formula,
+    data = list(x = x, t = t, y = y),
+    family = "gaussian",
+    control.predictor = list(compute = TRUE))
+
+#m = result$marginals.linear.predictor
+
+#m = result.pred$marginals.linear.predictor[[101]]
+#round (result.pred$summary.linear.predictor[101 ,], 3)
+
+#plot(m)
+#lines(inla.smarginal(m))
+```
+Virker ikke helt med den marginal linear predictor greia.
+
+Smooting binary time seires
+```{r}
+data ( Tokyo )
+head ( Tokyo )
+head ( Tokyo ,4)
+
+# Specify linear predictor
+formula = y ~ -1 + f(time , model ="rw2", cyclic = TRUE)
+
+# Run model
+result = inla(formula,
+    family = "binomial",
+    Ntrials = n,
+    data = Tokyo)
+
+plot(result)
+
+#Transform to probability
+result = inla ( formula,
+    family = "binomial",
+    Ntrials = n,
+    data = Tokyo,
+    control.predictor = list(compute = TRUE))
+plot(result)
+```
+
+Add weights to random components
+$formula = y \sim \mu + ... + f(idx, weight, model = ..., ...)$ makes the random effect term have a weight, from $\eta_i = ... + f_{idx_i}$ to $\eta_i = ... + weight_{idx_i}f_{idx_i}$. So, it adds a weight parameter.
+
+Changing the prior
+```{r}
+# Old way
+formula = y ~ f(idx, model = "iid", prior = "loggamma",
+    param = c(1, 0.1), initial = 4, fixed = FALSE)
+
+# New way
+hyper = list(prec = list(prior = "loggamma",
+    param = c(1, 0.1),
+    initial = 4,
+    fixed = FALSE))
+
+formula = y ~ f(idx,model = "iid", hyper = hyper) + ...
+
+inla.models()$latent$iid$hyper
+```
+
+Assign your own prior
+```{r}
+# use suitable support points x
+lprec = seq( -10, 10, len =100)
+
+# link the x and corresponding y values into a string which begins with " table :""
+#With some prior function 
+prior.table = INLA:::inla.paste(c("table:",cbind(lprec, prior.function(lprec))))
+
+hyper = list(prec = list(prior = prior.table))
+```
+
+Repeated poisson count:
+$$
+\text{log}(\mu_{jk}) = \alpha_0 + \alpha_1 \text{log}(Base_j/4) + \alpha_2TRT_j + \alpha_3 TRT_j \text{log}(Base_j/4) + \alpha_4 Age_j + \alpha_5 V4 + Ind_j + \beta_{jk}
+$$
+$\alpha_i$ follows a $N(0, \tau_{\alpha})$ where $tau_{\alpha}$ is known. $Ind_j$ and $\beta_{jk}$ are the same with gamma hyperpriors on their respective precisions.
+
+```{r}
+data(Epil)
+head(Epil,n =3)
+
+formula = y ~  Base*Trt + Age + V4 +
+          f(Ind, model ="iid",
+          hyper = list(prec = list(prior = "loggamma",
+          param = c(1, 0.01)))) +
+          f(rand, model ="iid",
+          hyper = list(prec = list(prior = "loggamma",
+          param = c(1, 0.01))))
+
+result = inla(formula, family ="poisson", data = Epil,
+  control.fixed = list(prec.intercept = 0.001 , prec = 0.001))
+```
+In the control.fixed above prec.intercept is just for the intercept precision while prec is for all other fixed effects. control.predictor can compute posterior marginals for linear predictors with compute, and apply linear transformations with A. control.compute can compute measures of fit, like dic, mlik and cpo. Also many other control statements. This is done below.
+```{r}
+result = inla(formula, #some formula
+          data = data, #some data
+          control.compute = list(mlik = TRUE)) #Computes the marginal likelihood
+
+# See result
+result$mlik
+result$dic$dic
+result$cpo$cpo
+result$cpo$pit
 
 
+```
+Can exchange mlik, marginal likelihood, with dic, Deviance information criteria, cpo, Conditional predictive ordinate or cpo for probability integral transform. DIC measures the trade-off between goodness of fit while trying to keep the model simple, ie. few parameters. CPO measures the fit with Bayesian hold on out cross validation for all data points. PIT:
+$$
+Prob(Y_i \leq y_i^{obs}|\mathbf{y}_{-i})
+$$
+
+There are several tools to extend these standard models like replicate and group, multiple likelihoods, copy, linear transformation of $\eta$ (A matrix), linear combinations, values and remote computing. Replicate simulates the random effects the requested number of times as  f(..., replicate = r [, nrep = nr ]). 
+```{r}
+#need to define i and r manually
+formula = y ~ f(i , model ="ar1", replicate =r) + intercept -1
+result = inla(formula, family = "poisson",
+    data = data.frame(y, i, r, intercept))
+```
+Similar with groups, but these are for structured random effects, like RW1, used by  f(..., group = g [, ngroup = ng]). Looks quite strange, but for a RW2, it connects a points not only to the 2 next and 2 previous points, but also the five closest points on every other RW2.
+When our data follows multiple likelihoods, we can structure the response y as a matrix or list, and apply a specific likelihood to each part of the list. Probably different hyperparameteres for each likelihood. 
+```{r}
+# With Y as a matrix with NA when the row is in another group, so only one 
+# non NA per row, groups as columns
+result = inla ( formula = Y ~ 1 + x ,
+          family = c("gaussian","gaussian") ,
+          data = list(Y = Y , x = x))
+
+```
+
+Copy allows us to use different elements of the same random effect, for example $x_i$ and $x_{i-1}$ if it doesent fit like an AR1 or RW2 or something predefined. The formula would then be: formula = y ~ f(i, model = "iid")
++ f(i.plus, copy="i") + ... when $\eta_i = u_i + u_{i-1}$. I assume the .plus shifts the sequence one to the right or something. Can also scale the copy, like f(i.plus, copy="i", hyper = list(beta=list(fixed=FALSE))). 
+
+Can also apply a linear transformation A to $\eta$:
+$$
+\eta^* = A\eta \text{ with }  y_i \sim \pi (y_i | \eta_i^* , \theta)
+$$
+```{r} 
+result = inla(formula, ... , control.predictor = list(A = A))
+```
+Can sometimes simplify the model and can be interchangeable with the copy feature sometimes. Can also do it as below.
+```{r}
+# Alternative construction
+A = cbind(rep(1 , n), x)
+x1 = c(1, 0) ; x2 = c(0, 1)
+
+# Run model
+result = inla ( formula = y ~ x1 + x2 - 1,
+          data = list(y = y, x1 = x1, x2 = x2),
+          control.predictor = list(A = A))
+```
+
+We might improve the model by using a linear combination of the latent field, like $v = Bx$ for some matrix $B$. Ideally we then use the vector $\hat{x} = [x, c]$, but this gives a much denser (less sparse) precision matrix. Can instead approximate. 
+```{r}
+n = 100
+x = rnorm(n)
+z = rnorm(n)
+idx = 1:n
+eta = 5 + x + z + rnorm(n)
+formula = y ~ 1 + x + z + f(idx , model ="iid")
+y = rpois(n, lambda = exp(eta))
+
+# Define linear combinations
+# Get alpha _x - alpha _z
+lc1 = inla.make.lincomb(x =1, z = -1)
+names(lc1) = "lc1"
+
+# Get an average over all random effects
+lc2 = inla.make.lincomb(idx = rep(1/n , n))
+names(lc2)= "lc2"
+
+# Run inla
+r = inla(formula , "poisson", data = data.frame (y , x , z , idx ) ,
+      lincomb = c( lc1 , lc2 ), 
+      control.inla = list(lincomb.derived.correlation.matrix = TRUE ))
+r$summary.lincomb.derived
+```
+
+RW2 with unobserved points in the middel
+```{r}
+# Generate data set
+y = cumsum(cumsum(rnorm(100, sd =0.01)))+ rnorm (100 , sd = 0.1)
+y = y[c(1:30 , 70:100)]
+
+# Make time vector * and * value vector
+t = c (1:30 , 70:100)
+v = 1:100
+
+# Run inla
+#values is the time points
+result = inla(formula = y ~ f(t, model ="rw2", values =v, 
+          constr = FALSE ) -1 , data = list (y = y, t = t, v = v))
+
+plot(result)
+```
+
+Can also make INLA run on a remote server with some setup, use inla.call = "remote". Something about submit and retrieve, some sort of saving of the model?
+
+Useful tricks, set verbose = TRUE, will show size, optimizer steps and where it failed. Can also check result$logfile. 
 
 
 
