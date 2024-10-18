@@ -101,6 +101,7 @@ library(ggplot2)
 library(tidyr)
 
 library(ggpubr)
+library(INLA)
 ```
 
 ```{r}
@@ -208,8 +209,8 @@ Where $\bf{x}$ $\sim RW1(\tau)$ where we fix $E, \mu$ and $\tau$ for the simulat
 #Simulating non-shocked data
 
 #Parameters
-E = 10
-mu = 4
+E = 3
+mu = 1
 sigma = 2
 T = 100 #Number of time points
 
@@ -220,10 +221,55 @@ y <- sapply(rates, function(r) rpois(1, r)) #samples from the Poisson
 
 plot(1:100, x)
 
-rates
+sim_non_shocked_data <- function(E, mu, sigma, T){
+  x <- RW1(sigma, T)
+  rates <- E * exp(mu + x) #rates is E*lambda or E*exp(mu + x)
+  y <- sapply(rates, function(r) rpois(1, r)) #samples from the Poisson
+  return(y) #The observed data
+}
+
+sim_non_shocked_dataframe <- function(E, mu, sigma, T, n, seed = 42){
+  set.seed(seed)
+  df <- data.frame(matrix(NA, nrow = T, ncol = n))
+  for(i in 1:n){df[, i] <- sim_non_shocked_data(E, mu, sigma, T) }
+  return(df)
+}
+
+test <- sim_non_shocked_dataframe(1, 2, 0.2, 100, 5)
+
+test$t <- 1:nrow(test)  # Create a time index from 1 to n
+
+# Reshape the dataframe to long format
+test_long <- test %>% pivot_longer(cols = starts_with("X"), names_to = "variable", values_to = "value")
+
+# Plot all lines using ggplot
+ggplot(test_long, aes(x = t, y = value, color = variable)) +
+  geom_line() +
+  labs(title = "Simulated non-shocked data with N=100 and 5 realisations", 
+       x = "Time", y = "y") + theme(legend.position = "none")
 ```
 
 The code above seems to work fine, but should possibly tune some of the parameters, or maybe the plot of the ys should look insane. 
+
+Now the next step is to fit some models with INLA, we will start with the direct smoothed model. 
+
+```{r}
+#need to input the data as a dataframe with a y column and time column
+formula <- y ~ f(time, model = "rw1") #intercept is included automatically
+
+test_data <- data.frame(matrix(c(test[, 2], 1:100), nrow = 100, ncol = 2)) # should make the 100 more general, like T
+colnames(test_data) <- c("y", "time")
+
+res <- inla(formula, family = "poisson", data = test_data)
+plot(res)
+summary(res)
+```
+
+Noe som er litt feil her, må kanskje inkludere E på et vis, tydeligvis mer enn det som er feil, kan hende dataen er for sporadisk
+
+
+
+
 
 ## Fitting the model with INLA
 Also need some criteria to compare the success of the models.
