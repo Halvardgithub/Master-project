@@ -197,7 +197,55 @@ RW_figure
 # Simulation study
 We want to conduct a small simulation study to see if the adaptive models improve the standard models in situations with shocks.First we will start with assessing the performance on non.shocked data.
 
-## Simulation of non-shocked data
+## Simulation of non-shocked Gaussian data
+We will simulate data with a latent temporal structured random effect as a RW1, denoted $\mathbf{x}$. The total Bayesian hierarchical model can be described as
+$$
+y_t | \eta_t \sim N(\eta_t, \sigma_t^2) \\
+\eta_t = \mu + x_t.
+$$
+For the moment we assume constant $\sigma_t$ for all timepoints, and choose some fixed $\sigma_r$ for the random walk.
+```{r}
+#function to simulate a realization y
+sim_non_shocked_gaussian_data <- function(T, mu, sigma_t, sigma_r){
+  #T timepoints, mean mu, and standard deviations for time and RW1
+  eta <- mu + RW1(sigma_r, T)
+  y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_t))
+  return(y)
+}
+
+sim_non_shocked_gaussian_dataframe <- function(T, mu, sigma_t, sigma_r, n, seed = 50){
+  set.seed(seed)
+  df <- data.frame(matrix(NA, nrow = T, ncol = n))
+  for(i in 1:n){
+    df[, i] <- sim_non_shocked_gaussian_data(T, mu, sigma_t, sigma_r) 
+  }
+  return(df)
+}
+
+test <- sim_non_shocked_gaussian_dataframe(50, 2, 0.001, 0.03, 5)
+
+test$t <- 1:nrow(test)  # Create a time index from 1 to n
+
+# Reshape the dataframe to long format
+test_long <- test %>% pivot_longer(cols = starts_with("X"), names_to = "variable", values_to = "value")
+
+# Plot all lines using ggplot
+ggplot(test_long, aes(x = t, y = value, color = variable)) +
+  geom_line() +
+  labs(title = "Simulated non-shocked Gaussian data with N=50 and 5 realisations", 
+       x = "Time", y = "y") + theme(legend.position = "none")
+```
+
+## Simulation of shocked Gaussian data
+We now want to simulate Gaussian data where we know that there are shocks on certain timepoints. This could be modeled by adding or subtracting a slightly randomized value from the chosen points. 
+
+
+
+
+
+
+
+## Simulation of non-shocked Poisson data
 We will simulate data with a latent temporal structured random effect as a RW1. The total Bayesian hierarchical model can be described as
 $$
 Y|\lambda \sim Poisson(E\lambda) \\
@@ -209,9 +257,9 @@ Where $\bf{x}$ $\sim RW1(\tau)$ where we fix $E, \mu$ and $\tau$ for the simulat
 #Simulating non-shocked data
 
 #Parameters
-E = 3
+E = 100
 mu = 1
-sigma = 2
+sigma = 0.2
 T = 100 #Number of time points
 
 #A single simulation
@@ -228,14 +276,14 @@ sim_non_shocked_data <- function(E, mu, sigma, T){
   return(y) #The observed data
 }
 
-sim_non_shocked_dataframe <- function(E, mu, sigma, T, n, seed = 42){
+sim_non_shocked_dataframe <- function(E, mu, sigma, T, n, seed = 44){
   set.seed(seed)
   df <- data.frame(matrix(NA, nrow = T, ncol = n))
   for(i in 1:n){df[, i] <- sim_non_shocked_data(E, mu, sigma, T) }
   return(df)
 }
 
-test <- sim_non_shocked_dataframe(1, 2, 0.2, 100, 5)
+test <- sim_non_shocked_dataframe(100, 4, 0.001, 100, 5)
 
 test$t <- 1:nrow(test)  # Create a time index from 1 to n
 
@@ -252,33 +300,40 @@ ggplot(test_long, aes(x = t, y = value, color = variable)) +
 The code above seems to work fine, but should possibly tune some of the parameters, or maybe the plot of the ys should look insane. 
 
 Now the next step is to fit some models with INLA, we will start with the direct smoothed model. 
+## Fitting the model with INLA
 
 ```{r}
 #need to input the data as a dataframe with a y column and time column
 formula <- y ~ f(time, model = "rw1") #intercept is included automatically
 
-test_data <- data.frame(matrix(c(test[, 2], 1:100), nrow = 100, ncol = 2)) # should make the 100 more general, like T
-colnames(test_data) <- c("y", "time")
+test_data <- data.frame(matrix(c(test[, 2], 1:100, rep(E, 100)), nrow = 100, ncol = 3)) # should make the 100 more general, like T
+colnames(test_data) <- c("y", "time", "E")
 
-res <- inla(formula, family = "poisson", data = test_data)
+res <- inla(formula, E = E, family = "poisson", data = test_data)
 plot(res)
 summary(res)
+?inla
 ```
 
-Noe som er litt feil her, må kanskje inkludere E på et vis, tydeligvis mer enn det som er feil, kan hende dataen er for sporadisk
+Seems like it works quite well, the posterior distributions align rather well with the true parameters for mean and precision.
 
 
 
 
 
-## Fitting the model with INLA
-Also need some criteria to compare the success of the models.
+
+
+
+
+
+
+
+The following is code from a PowerPoint on Inla by Andrea Riebler, as well as some additional testing and modification by myself.
 
 ```{r}
 library(INLA)
 ```
 
-The following is code from a PowerPoint on Inla by Andrea Riebler, as well as some additional testing and modification by myself.
 
 A simple linear regression
 ```{r}
@@ -510,7 +565,7 @@ r = inla(formula , "poisson", data = data.frame (y , x , z , idx ) ,
 r$summary.lincomb.derived
 ```
 
-RW2 with unobserved points in the middel
+RW2 with unobserved points in the middle
 ```{r}
 # Generate data set
 y = cumsum(cumsum(rnorm(100, sd =0.01)))+ rnorm (100 , sd = 0.1)
