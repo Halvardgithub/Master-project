@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Random walk 1
 For the random walk 1 we have a diagonal precision matrix with $2$ on the diagonal and $-1$ on the neighboring diagonals. The first and last elements on the diagonal are set to $1$, so all rows sum to $0$. $k$ is some scale constant. We also assume a zero mean, but adding a different mean is just a location shift.
 
-```{r}
+```{r, eval=FALSE}
 #Creating the structure matrix
 n = 4
 R <- diag(2, n)
@@ -35,7 +35,7 @@ $$
 \lambda_i = 2 - 2\text{cos}(\pi (i-1)/n), \quad i = 1, ..., n
 $$
 Tried sampling with Algorithm 3.1, does not appear to work as expected. Maybe its missing some constraint, like the sum of $x$ equals $0$, or something with my implementation.
-```{r}
+```{r, eval=FALSE}
 # Eigenvalues
 eigVecs <- eigen(Q, symmetric=TRUE) #Finds the eigenvectors
 
@@ -59,12 +59,12 @@ for(i in 1:(n-1)){
 
 ```
 
-```{r}
+```{r, eval=FALSE}
 plot(1:n, x)
 ```
 
 Another approach is to mimic the algorithms from the earlier sections, however our Q is singular
-```{r}
+```{r, eval=FALSE}
 A <- eigVecs$vectors[1, 1:n]
 Q_inv <- solve(Q)
 det(Q)
@@ -87,13 +87,7 @@ x_adj <- x - Q_inv%*%A *solve(t(A)%*%Q_inv%*%A)*(t(A)%*%x)
 
 
 
-## Basic random walk
-The easiest way to simulate a random walk is through the assumption of independent normal distributed increments. We know that '
-$$
-x_{t+1} | x_1, ..., x_t, \sigma = x_{t+1}|x_t, \sigma \sim N(x_t, \sigma^2)
-$$
-Thus, all we need to do is sample from the standard normal, scale them by $\sigma$ and add them sequentially. Standard to assert that $x_0 = 0$.
-
+For now only using code below this point, the above code does not work.
 
 ```{r}
 #Libraries
@@ -104,38 +98,67 @@ library(ggpubr)
 library(INLA)
 ```
 
+## Basic random walk
+The easiest way to simulate a random walk is through the assumption of independent normal distributed increments. We know that '
+$$
+x_{t+1} | x_1, ..., x_t, \sigma = x_{t+1}|x_t, \sigma \sim N(x_t, \sigma^2)
+$$
+Thus, all we need to do is sample from the standard normal, scale them by $\sigma$ and add them sequentially. Standard to assert that $x_0 = 0$.
+
+
+Defining a basic plotting function that will come in handy
+
 ```{r}
-RW1 <- function(sigma, T){
-  # sigma^2 is the variance for the transitions and T is the number of points
-  x <- rep(0, T)
-  z <- sigma * rnorm(T-1)
-  for(j in 2:T){
+plot_realizations <- function(df, title, xlabel = "t", ylabel = "y", legend = TRUE){
+  #Need to give in a dataframe with fitting colnames, used by the legend
+  df$t <- 1:nrow(df)  # Create a time index from 1 to n
+  df_long <- df %>% pivot_longer(cols = -t, names_to = "variable", values_to = "value")
+  
+  ggplot(df_long, aes(x = t, y = value, color = variable)) +
+  geom_line() +
+  labs(title = title, 
+       x = xlabel, y = ylabel) +
+    if (legend) {theme(legend.title = element_blank())}
+    else {theme(legend.position = "none")}
+}
+```
+
+Now, lets define functionality for the random walk.
+```{r}
+RW1 <- function(sigma, N){
+  # sigma^2 is the variance for the transitions and N is the number of points
+  x <- rep(0, N)
+  z <- sigma * rnorm(N-1)
+  for(j in 2:N){
     x[j] <- x[j-1] + z[j-1]
   }
   return(x)
 }
 
-#Parameters for simulation of RW1
-n <- 10
-T <- 100
-sigma <- 1
-
-df <- data.frame(matrix(NA, nrow = T, ncol = n))
-set.seed(0)
-for (i in 1:n){
-  df[, i] <- RW1(sigma, T) 
+#Also making a normalized RW1, ie. it sums to zero
+Norm_RW1 <- function(sigma, N){
+  # sigma^2 is the variance for the transitions and N is the number of points
+  x <- rep(0, N)
+  z <- sigma * rnorm(N-1)
+  for(j in 2:N){
+    x[j] <- x[j-1] + z[j-1]
+  }
+  return(x -  mean(x)) #makes the mean zero
 }
 
-df$t <- 1:nrow(df)  # Create a time index from 1 to n
+#Parameters for simulation of RW1
+n <- 10
+N <- 100
+sigma <- 1
 
-# Reshape the dataframe to long format
-df_long <- df %>% pivot_longer(cols = starts_with("X"), names_to = "variable", values_to = "value")
+df <- data.frame(matrix(NA, nrow = N, ncol = n))
+set.seed(0)
+for (i in 1:n){
+  df[, i] <- RW1(sigma, N) 
+}
 
 # Plot all lines using ggplot
-RW1_plot <- ggplot(df_long, aes(x = t, y = value, color = variable)) +
-  geom_line() +
-  labs(title = "RW1 with N=100", x = "Time", y = "y") +
-  theme(legend.position = "none")
+RW1_plot <- plot_realizations(df, "RW1 with N=100", legend = FALSE)
 
 ```
 
@@ -151,11 +174,11 @@ x_{t+2} = 2x_{t+1} - x_t + \epsilon_t \\
 $$
 
 ```{r}
-RW2 <- function(sigma, T){
-  # sigma^2 is the variance for the transitions and T is the number of points
-  x <- rep(0, T)
-  z <- sigma * rnorm(T-1)
-  for(j in 3:T){
+RW2 <- function(sigma, N){
+  # sigma^2 is the variance for the transitions and N is the number of points
+  x <- rep(0, N)
+  z <- sigma * rnorm(N-1)
+  for(j in 3:N){
     x[j] <- 2*x[j-1] - x[j-2] + z[j-1]
   }
   return(x)
@@ -163,27 +186,17 @@ RW2 <- function(sigma, T){
 
 #Parameters for simulation of RW2
 n <- 10
-T <- 100
+N <- 100
 sigma <- 1
 
-df2 <- data.frame(matrix(NA, nrow = T, ncol = n))
+df2 <- data.frame(matrix(NA, nrow = N, ncol = n))
 set.seed(0)
 for (i in 1:n){
-  df2[, i] <- RW2(sigma, T)
+  df2[, i] <- RW2(sigma, N)
 }
 
-df2$t <- 1:nrow(df2)  # Create a time index from 1 to n
-
-# Reshape the dataframe to long format
-df2_long <- df2 %>% pivot_longer(cols = starts_with("X"), names_to = "variable", values_to = "value")
-
 # Plot all lines using ggplot
-RW2_plot <- ggplot(df2_long, aes(x = t, y = value, color = variable)) +
-  geom_line() +
-  labs(title = "RW2 with N=100", x = "Time", y = "y") +
-  theme(legend.position = "none")
-
-
+RW2_plot <- plot_realizations(df2, "RW2 with N=100", legend = FALSE)
 ```
 
 
@@ -203,42 +216,164 @@ $$
 y_t | \eta_t \sim N(\eta_t, \sigma_t^2) \\
 \eta_t = \mu + x_t.
 $$
-For the moment we assume constant $\sigma_t$ for all timepoints, and choose some fixed $\sigma_r$ for the random walk.
+For the moment we assume constant $\sigma_t$ for all timepoints, and choose some fixed $\sigma_r$ for the random walk.First, lets make the general functions and do some testing.
+
 ```{r}
 #function to simulate a realization y
-sim_non_shocked_gaussian_data <- function(T, mu, sigma_t, sigma_r){
-  #T timepoints, mean mu, and standard deviations for time and RW1
-  eta <- mu + RW1(sigma_r, T)
-  y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_t))
+sim_non_shocked_gaussian_data <- function(N, mu, sigma_o, sigma_r){
+  #N timepoints, mean mu, and standard deviations observations and the RW1
+  eta <- mu + Norm_RW1(sigma_r, N)
+  y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_o))
   return(y)
 }
 
-sim_non_shocked_gaussian_dataframe <- function(T, mu, sigma_t, sigma_r, n, seed = 50){
+sim_non_shocked_gaussian_dataframe <- function(N, mu, sigma_o, sigma_r, n, seed = 50){
   set.seed(seed)
-  df <- data.frame(matrix(NA, nrow = T, ncol = n))
+  df <- data.frame(matrix(NA, nrow = N, ncol = n))
   for(i in 1:n){
-    df[, i] <- sim_non_shocked_gaussian_data(T, mu, sigma_t, sigma_r) 
+    df[, i] <- sim_non_shocked_gaussian_data(N, mu, sigma_o, sigma_r) 
   }
   return(df)
 }
 
+#Visualising some simulated data
 test <- sim_non_shocked_gaussian_dataframe(50, 2, 0.001, 0.03, 5)
 
-test$t <- 1:nrow(test)  # Create a time index from 1 to n
-
-# Reshape the dataframe to long format
-test_long <- test %>% pivot_longer(cols = starts_with("X"), names_to = "variable", values_to = "value")
-
-# Plot all lines using ggplot
-ggplot(test_long, aes(x = t, y = value, color = variable)) +
-  geom_line() +
-  labs(title = "Simulated non-shocked Gaussian data with N=50 and 5 realisations", 
-       x = "Time", y = "y") + theme(legend.position = "none")
+plot_realizations(test, "Simulated non-shocked Gaussian data with N=50 and 5 realisations", legend = FALSE)
 ```
 
-## Simulation of shocked Gaussian data
-We now want to simulate Gaussian data where we know that there are shocks on certain timepoints. This could be modeled by adding or subtracting a slightly randomized value from the chosen points. 
+## Model evaluation of the the direct model for non-shocked Gaussian data
+For our actual simulation study we are interested in $N=50$ timepoints and 100 realizations. We will then fit a direct smooth model and an adaptive model to each realization and compare some model criteria, like DIC etc. 
 
+```{r}
+#The dataframe for all non-shocked Gaussian data
+N <- 50
+n <- 100
+sigma_o <- 0.001
+sigma_r <- 0.03
+mu <- 2
+NSG_dataframe <- sim_non_shocked_gaussian_dataframe(N, mu, sigma_o, sigma_r, n)
+NSG_dataframe$t <- 1:N
+
+Model_eval_NSG <- data.frame(matrix(NA, nrow = n, ncol = 2)) # need to increase 2 later
+colnames(Model_eval_NSG) <- c("DIC_DS", "CPO_DS")
+
+formula <- y ~ f(time, model = "rw1") #intercept is included automatically
+for(i in 1:n){#iterate over each simulated realization
+  test_data <- NSG_dataframe[, c(i, n + 1)] #gets the i-th realization and time
+  colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+  res_DS <- inla(formula, family = "gaussian", data = test_data, 
+            control.compute = list(dic = TRUE, cpo = TRUE))
+  Model_eval_NSG[i, ] <- c(res_DS$dic$dic, res_DS$cpo$cpo)
+}
+
+Model_eval_NSG
+
+#plot(res)
+#summary(res)
+#res$dic$dic
+```
+
+
+
+
+
+
+## Simulation of shocked Gaussian data
+We now want to simulate Gaussian data where we know that there are shocks on certain timepoints. This could be modeled by adding or subtracting a slightly randomized value from the chosen points. Lets say we want a shock from $t=20$ to $t=30$, which could be done by adding a $s_t \overset{iid} \sim N(0.7, 0.3)$ for instance.
+
+```{r}
+#Parameters and constants
+N <- 50
+n <- 100
+sigma_o <- 0.001
+sigma_r <- 0.03
+mu <- 2
+
+#A comparison of non-shocked and shocked simulated data
+NSG_data <- sim_non_shocked_gaussian_data(N, mu, sigma_o, sigma_r)
+offset <- c(rep(0, 19),rnorm(11, 0.7, 0.3), rep(0, 20))
+SG_data <- NSG_data + offset
+
+example_dataframe <- data.frame(matrix(c(NSG_data, SG_data), nrow = N, ncol = 2))
+colnames(example_dataframe) <- c("NS", "S") #Non-shocked and shocked
+
+plot_realizations(example_dataframe, "Comparison of shocked and non-shocked simulated data", "t", "y")
+
+#Non-shocked data and inlas prediction for the smooth direct model
+formula <- y ~ f(time, model = "rw1") #intercept is included automatically
+
+test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
+colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+res <- inla(formula, family = "gaussian", data = test_data, 
+            control.compute = list(dic = TRUE, cpo = TRUE))
+preds <- res$summary.fitted.values$mean
+
+plot_df <- data.frame(matrix(c(NSG_data, preds), ncol = 2))
+colnames(plot_df) <- c("sim_data", "preds")
+
+plot_realizations(plot_df, "Simulated data and predicted values for non-shocked data", "t", "y")
+
+#Shocked data and inlas prediction for the smooth direct model
+test_data <- data.frame(matrix(c(SG_data, 1:N), nrow = N, ncol = 2)) 
+colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+res <- inla(formula, family = "gaussian", data = test_data, 
+            control.compute = list(dic = TRUE, cpo = TRUE))
+preds <- res$summary.fitted.values$mean
+
+plot_df <- data.frame(matrix(c(SG_data, preds), ncol = 2))
+colnames(plot_df) <- c("sim_data", "preds")
+
+plot_realizations(plot_df, "Simulated data and predicted values for shocked data", "t", "y")
+```
+
+## Criterias for model evaluation 
+
+### Root mean square eroor
+A common model criteria is the root mean square error, or RMSE. We define a function to calculate this below.
+
+```{r}
+RMSE <- function(data, preds){
+  return(sqrt( sum((data - preds)**2) / length(data))) #definition of RMSE
+}
+```
+
+### Average proper logarithmic scoring rule(LS)
+From a paper by Gneiting and Raftery (2007). 
+$$
+\text{LS}(p, \omega) = \text{log}p(\omega)
+$$
+where $p$ is the predicted distribution of a point, which we get from INLA, and $\omega$ is the observed value, which is the specific datapoint. We then take the average of the result for all the data points which unique prediction densities.
+
+it does not work yet
+```{r}
+LS <- function(res, data){
+  #res is an inla object from calling a model on data, a vector of datapoints
+  log_sum <- 0
+  for (i in 1:length(data)){
+    p <- (res$...something)(data[i]) # need some way to get the denisty of preds
+    log_sum <- log_sum + log(p)
+  }
+  return(log_sum / length(data)) #returns the average
+}
+```
+
+
+
+## Implementing the adaptive random walk in the latent model
+
+
+
+Sprøsmål:
+Burde RW'en summerere til en når jeg simulerer dataen? For å garantere konstant mean over alle realisatsjonene.
+Hvordan simulere shocked data?
+
+To do:
+Make use of the plot function everywhere
+Implement adaptive RW, maybe look at github og wakefield et al
+Choose model criteria
+Write about INLA
+Use set.seed() to make results reproducible
 
 
 
