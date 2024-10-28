@@ -216,118 +216,40 @@ $$
 y_t | \eta_t \sim N(\eta_t, \sigma_t^2) \\
 \eta_t = \mu + x_t.
 $$
-For the moment we assume constant $\sigma_t$ for all timepoints, and choose some fixed $\sigma_r$ for the random walk.First, lets make the general functions and do some testing.
+For the moment we assume constant $\sigma_t$ for all timepoints, and choose some fixed $\sigma_r$ for the random walk. First, lets make the general functions.
 
 ```{r}
 #function to simulate a realization y
-sim_non_shocked_gaussian_data <- function(N, mu, sigma_o, sigma_r){
+sim_non_shocked_gaussian_data <- function(N, mu, sigma_obs, sigma_rw){
   #N timepoints, mean mu, and standard deviations observations and the RW1
-  eta <- mu + Norm_RW1(sigma_r, N)
-  y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_o))
+  eta <- mu + Norm_RW1(sigma_rw, N)
+  y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_obs))
   return(y)
 }
 
-sim_non_shocked_gaussian_dataframe <- function(N, mu, sigma_o, sigma_r, n, seed = 50){
+sim_non_shocked_gaussian_dataframe <- function(N, mu, sigma_obs, sigma_rw, n, seed = 50){
   set.seed(seed)
   df <- data.frame(matrix(NA, nrow = N, ncol = n))
   for(i in 1:n){
-    df[, i] <- sim_non_shocked_gaussian_data(N, mu, sigma_o, sigma_r) 
+    df[, i] <- sim_non_shocked_gaussian_data(N, mu, sigma_obs, sigma_rw) 
   }
   return(df)
 }
 
-#Visualising some simulated data
-test <- sim_non_shocked_gaussian_dataframe(50, 2, 0.001, 0.03, 5)
+#The dataframe for all non-shocked Gaussian data
+N <- 50
+n <- 100
+sigma_obs <- 0.001
+sigma_rw <- 0.03
+mu <- 2
+NSG_dataframe <- sim_non_shocked_gaussian_dataframe(N, mu, sigma_obs, sigma_rw, n)
 
-plot_realizations(test, "Simulated non-shocked Gaussian data with N=50 and 5 realisations", legend = FALSE)
+#Visualizing some simulated data
+plot_realizations(NSG_dataframe[, 1:5], "Simulated non-shocked Gaussian data with N=50 and 5 realisations", legend = FALSE)
 ```
 
 ## Model evaluation of the the direct model for non-shocked Gaussian data
 For our actual simulation study we are interested in $N=50$ timepoints and 100 realizations. We will then fit a direct smooth model and an adaptive model to each realization and compare some model criteria, like DIC etc. 
-
-```{r}
-#The dataframe for all non-shocked Gaussian data
-N <- 50
-n <- 100
-sigma_o <- 0.001
-sigma_r <- 0.03
-mu <- 2
-NSG_dataframe <- sim_non_shocked_gaussian_dataframe(N, mu, sigma_o, sigma_r, n)
-NSG_dataframe$t <- 1:N
-
-Model_eval_NSG <- data.frame(matrix(NA, nrow = n, ncol = 2)) # need to increase 2 later
-colnames(Model_eval_NSG) <- c("DIC_DS", "CPO_DS")
-
-formula <- y ~ f(time, model = "rw1") #intercept is included automatically
-for(i in 1:n){#iterate over each simulated realization
-  test_data <- NSG_dataframe[, c(i, n + 1)] #gets the i-th realization and time
-  colnames(test_data) <- c("y", "time") #makes the colnames match the formula
-  res_DS <- inla(formula, family = "gaussian", data = test_data, 
-            control.compute = list(dic = TRUE, cpo = TRUE))
-  Model_eval_NSG[i, ] <- c(res_DS$dic$dic, res_DS$cpo$cpo)
-}
-
-Model_eval_NSG
-
-#plot(res)
-#summary(res)
-#res$dic$dic
-```
-
-
-
-
-
-
-## Simulation of shocked Gaussian data
-We now want to simulate Gaussian data where we know that there are shocks on certain timepoints. This could be modeled by adding or subtracting a slightly randomized value from the chosen points. Lets say we want a shock from $t=20$ to $t=30$, which could be done by adding a $s_t \overset{iid} \sim N(0.7, 0.3)$ for instance.
-
-```{r}
-#Parameters and constants
-N <- 50
-n <- 100
-sigma_o <- 0.001
-sigma_r <- 0.03
-mu <- 2
-
-#A comparison of non-shocked and shocked simulated data
-NSG_data <- sim_non_shocked_gaussian_data(N, mu, sigma_o, sigma_r)
-offset <- c(rep(0, 19),rnorm(11, 0.7, 0.3), rep(0, 20))
-SG_data <- NSG_data + offset
-
-example_dataframe <- data.frame(matrix(c(NSG_data, SG_data), nrow = N, ncol = 2))
-colnames(example_dataframe) <- c("NS", "S") #Non-shocked and shocked
-
-plot_realizations(example_dataframe, "Comparison of shocked and non-shocked simulated data", "t", "y")
-
-#Non-shocked data and inlas prediction for the smooth direct model
-formula <- y ~ f(time, model = "rw1") #intercept is included automatically
-
-test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
-colnames(test_data) <- c("y", "time") #makes the colnames match the formula
-res <- inla(formula, family = "gaussian", data = test_data, 
-            control.compute = list(dic = TRUE, cpo = TRUE))
-preds <- res$summary.fitted.values$mean
-
-plot_df <- data.frame(matrix(c(NSG_data, preds), ncol = 2))
-colnames(plot_df) <- c("sim_data", "preds")
-
-plot_realizations(plot_df, "Simulated data and predicted values for non-shocked data", "t", "y")
-
-#Shocked data and inlas prediction for the smooth direct model
-test_data <- data.frame(matrix(c(SG_data, 1:N), nrow = N, ncol = 2)) 
-colnames(test_data) <- c("y", "time") #makes the colnames match the formula
-res <- inla(formula, family = "gaussian", data = test_data, 
-            control.compute = list(dic = TRUE, cpo = TRUE))
-preds <- res$summary.fitted.values$mean
-
-plot_df <- data.frame(matrix(c(SG_data, preds), ncol = 2))
-colnames(plot_df) <- c("sim_data", "preds")
-
-plot_realizations(plot_df, "Simulated data and predicted values for shocked data", "t", "y")
-```
-
-## Criterias for model evaluation 
 
 ### Root mean square eroor
 A common model criteria is the root mean square error, or RMSE. We define a function to calculate this below.
@@ -359,19 +281,150 @@ LS <- function(res, data){
 ```
 
 
+### The direct smooth model with INLA
+We fill fit the simple model in INLA with a latent layer as
+$$
+\eta_t = \mu + x_t
+$$
+where $x_t$ is a RW1 with some precision $\tau$ with a default prior. We use a Gaussian likelihood in the observation layer.
+
+```{r}
+#Data preperation
+NSG_data <- data.frame(matrix(c(NSG_dataframe[, 1], 1:N), nrow = N, ncol = 2)) 
+colnames(NSG_data) <- c("y", "time") #makes the colnames match the formula
+
+#The INLA model
+formula <- y ~ f(time, model = "rw1") #intercept is included automatically
+res <- inla(formula, family = "gaussian", data = NSG_data, 
+            control.compute = list(dic = TRUE, cpo = TRUE))
+
+#For plotting the data and the predicted values
+preds <- res$summary.fitted.values$mean
+plot_df <- data.frame(matrix(c(NSG_dataframe[, 1], preds), ncol = 2))
+colnames(plot_df) <- c("sim_data", "preds") #for legends in the plot
+
+plot_realizations(plot_df, "Simulated data and predicted values for non-shocked data")
+```
+
+We see that the model predictions align well with the data it is fit on.
+
+```{r}
+Model_eval_NSG <- data.frame(matrix(NA, nrow = n, ncol = 2)) # need to increase 2 later
+colnames(Model_eval_NSG) <- c("DIC_DS", "RMSE")
+
+NSG_dataframe$t <- 1:N #adds the timecolumn
+
+formula <- y ~ f(time, model = "rw1") #intercept is included automatically
+for(i in 1:n){#iterate over each simulated realization
+  test_data <- NSG_dataframe[, c(i, n + 1)] #gets the i-th realization and time
+  colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+  res_DS <- inla(formula, family = "gaussian", data = test_data, 
+            control.compute = list(dic = TRUE, cpo = TRUE))
+  preds <- res_DS$summary.fitted.values$mean
+  Model_eval_NSG[i, ] <- c(res_DS$dic$dic, RMSE(NSG_dataframe[, i], preds))
+  #can get CPO by res_DS$cpo$cpo
+}
+
+#Model_eval_NSG
+
+#plot(res)
+#summary(res)
+#res$dic$dic
+```
+
+
+
+
+
+
+## Simulation of shocked Gaussian data
+We now want to simulate Gaussian data where we know that there are shocks on certain timepoints. This could be modeled by adding or subtracting a slightly randomized value from the chosen points. Lets say we want a shock from $t=20$ to $t=30$, which could be done by adding a $s_t \overset{iid} \sim N(0.4, 0.3)$ for instance.
+
+```{r}
+#Parameters and constants
+N <- 50
+n <- 100
+sigma_obs <- 0.001
+sigma_rw <- 0.03
+mu <- 2
+
+#A comparison of non-shocked and shocked simulated data
+NSG_data <- sim_non_shocked_gaussian_data(N, mu, sigma_obs, sigma_rw)
+offset <- c(rep(0, 19),rnorm(11, 0.7, 0.3), rep(0, 20))
+SG_data <- NSG_data + offset
+
+example_dataframe <- data.frame(matrix(c(NSG_data, SG_data), nrow = N, ncol = 2))
+colnames(example_dataframe) <- c("NS", "S") #Non-shocked and shocked
+
+plot_realizations(example_dataframe, "Comparison of shocked and non-shocked simulated data", "t", "y")
+
+#Non-shocked data and inlas prediction for the smooth direct model
+formula <- y ~ f(time, model = "rw1") #intercept is included automatically
+
+test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
+colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+res_NS <- inla(formula, family = "gaussian", data = test_data)
+preds_NS <- res_NS$summary.fitted.values$mean
+
+plot_df <- data.frame(matrix(c(NSG_data, preds_NS), ncol = 2))
+colnames(plot_df) <- c("sim_data", "preds")
+
+plot_realizations(plot_df, "Simulated data and predicted values for non-shocked data", "t", "y")
+
+#Shocked data and inlas prediction for the smooth direct model
+test_data <- data.frame(matrix(c(SG_data, 1:N), nrow = N, ncol = 2)) 
+colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+res_S <- inla(formula, family = "gaussian", data = test_data)
+preds_S <- res_S$summary.fitted.values$mean
+
+plot_df <- data.frame(matrix(c(SG_data, preds_S), ncol = 2))
+colnames(plot_df) <- c("sim_data", "preds")
+
+plot_realizations(plot_df, "Simulated data and predicted values for shocked data", "t", "y")
+```
+
+Lets make some general functions for simulating shocked Gaussian data.
+
+```{r}
+#function to simulate a shocked realization y
+sim_shocked_gaussian_data <- function(N, mu, sigma_obs, sigma_rw, t_start = 20, t_end = 30, mu_offset = 0.7, sigma_offset = 0.3){
+  #N timepoints, mean mu, and standard deviations observations and the RW1
+  eta <- mu + Norm_RW1(sigma_rw, N)
+  y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_obs))
+  offset <- c(rep(0, t_start - 1),rnorm(t_end - t_start + 1, mu_offset, sigma_offset), rep(0, N - t_end))
+  y_offset <- y + offset
+  return(y_offset)
+}
+
+sim_shocked_gaussian_dataframe <- function(N, mu, sigma_obs, sigma_rw, t_start = 20, t_end = 30, mu_offset = 0.7, sigma_offset = 0.3, n, seed = 50){
+  set.seed(seed)
+  df <- data.frame(matrix(NA, nrow = N, ncol = n))
+  for(i in 1:n){
+    df[, i] <- sim_shocked_gaussian_data(N, mu, sigma_obs, sigma_rw, t_start, t_end, mu_offset, sigma_offset) 
+  }
+  return(df)
+}
+
+#Shocked Gaussian dataframe
+SG_dataframe <- sim_shocked_gaussian_dataframe(N, mu, sigma_obs, sigma_rw, n=n)
+
+#Visualizing some simulated data
+plot_realizations(SG_dataframe[, 1:5], "Simulated shocked Gaussian data with N=50 and 5 realisations", legend = FALSE)
+```
+
+
 
 ## Implementing the adaptive random walk in the latent model
 
 
 
 Sprøsmål:
-Burde RW'en summerere til en når jeg simulerer dataen? For å garantere konstant mean over alle realisatsjonene.
-Hvordan simulere shocked data?
+
 
 To do:
-Make use of the plot function everywhere
+Make use of the plot function everywhere - done
 Implement adaptive RW, maybe look at github og wakefield et al
-Choose model criteria
+Choose model criteria - somewhat done
 Write about INLA
 Use set.seed() to make results reproducible
 
