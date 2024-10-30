@@ -1,5 +1,5 @@
 ---
-title: "Master project"
+title: "Master project - backup"
 author: "Halvard"
 date: "`r Sys.Date()`"
 output: pdf_document
@@ -414,19 +414,406 @@ plot_realizations(SG_dataframe[, 1:5], "Simulated shocked Gaussian data with N=5
 
 
 
-## Implementing the adaptive random walk in the latent model
+## Implementing the adaptive random walk in the latent model in INLA
+As this is somewhat complicated and new to me, I will start by a slightly easier example, namely the RW1. Can then also compare it to the already defined RW1 in INLA to ensure it works as intended. First some basic theory on defining random effects in INLA from https://becarioprecario.bitbucket.io/inla-gitbook/ch-newmodels.html .
 
+### Defining new latent random effects in INLA
+New latent effects must be specified as GMRFs. So we need $\mu$, $Q$ and $\theta$ and its log-priors and initial values. Also need a graph, which I think can just be $Q$ as well, and some log-normalizing constant. As $\theta$ is parametrized as $\theta_1 = log(\tau)$ and $\theta_2 = logit(\rho) $ where $\tau$ is the precision and $\rho$ is the spacial dependence, which I think we define to be $1$.
+
+```{r}
+library(INLA)
+sym_tridiag_matrix <- toeplitz(c(2, -1, rep(0, 3)))
+sym_tridiag_matrix[1, 1] <- sym_tridiag_matrix[5, 5] <- 1 #first and last diag
+inla.as.sparse(sym_tridiag_matrix)
+```
+
+The general structure of the inla.rgeneric is shown below:
+```{r, eval=FALSE}
+inla.rgeneric.somemodel = function(
+  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
+  theta = NULL)
+{
+  # for reference and potential storage for objects to
+  # cache, this is the environment of this function
+  # which holds arguments passed as `...` in
+  # `inla.rgeneric.define()`.
+  envir = parent.env(environment())
+  graph = function(){ <to be completed> }
+  Q = function() { <to be completed> }
+  mu = function() { <to be completed> }
+  log.norm.const = function() { <to be completed> }
+  log.prior = function() { <to be completed> }
+  initial = function() { <to be completed> }
+  quit = function() { <to be completed> }
+  
+  # sometimes this is useful, as argument 'graph' and 'quit'
+  # will pass theta=numeric(0) (or NULL in R-3.6...) as
+  # the values of theta are NOT
+  # required for defining the graph. however, this statement
+  # will ensure that theta is always defined.
+  
+  if (!length(theta)) theta = initial()
+  val = do.call(match.arg(cmd), args = list())
+  return (val)
+}
+
+#if W is a needed argument
+somemodel.model <- inla.rgeneric.define(inla.rgeneric.somemodel, W = W)
+
+```
+
+
+
+
+
+### Implementing RW1 in INLA
+In a RW1 we only have one hyperparameter, namely $\tau$. So we get $\theta = \text{log}(\tau)$ and the precision matrix is defined previously. Lets first define the inla.rgeneric function with all its necessary subfunctions.
+```{r}
+inla.rgeneric.RW1.model = function(
+  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
+  theta = NULL)
+{
+  #Input:
+  #N is the number of timepoints
+  
+  envir = parent.env(environment())
+  
+  interpret_theta <- function() { return(list(prec = exp(theta[1L])))}
+  
+  graph <- function() {return(Q())}
+  
+  #Could only create the upper diagonal with Toeplitz in pracma,
+  #or create it as sparse from the beginning
+  Q <- function() {
+    p <- interpret_theta()
+    dense_R <- toeplitz(c(2, -1, rep(0, N - 2)))#2 on diag and -1 on firstdiags
+    dense_R[1, 1] <- dense_R[N, N] <- 1 # 1 for first and last diag element
+    return(inla.as.sparse(p$prec * dense_R)) #sparse representation
+  }
+  
+  mu <- function() {return(numeric(0))}
+  
+  #Need to find a good initial value for theta on the log-scale
+  initial <- function() {return(4)}#I think 4 is default initial for precisions
+  
+  #INLA will calculate the constant when numeric(0) is returned
+  log.norm.const <- function() {return(numeric(0))}
+  
+  log.prior <- function() {#default: shape = 1, rate = 0.00005
+    p <- interpret_theta()
+    prior <- dgamma(p$prec, shape = 1 , rate = 0.00005 , log = TRUE) + p$prec
+    return(prior)
+  } #could maybe just add theta instead of log(prec)
+  
+  quit <- function() {return(invisible())}
+  
+  #to ensure theta is defined
+  if (!length(theta)) theta = initial()
+  
+  vals <- do.call(match.arg(cmd), args = list())
+  return(vals)
+}
+
+N <- 50 #is defined further up as well
+RW1_model <- inla.rgeneric.define(inla.rgeneric.RW1.model, N = N)
+```
+
+Lets test if it works as intended on some data from earlier.
+```{r}
+#The INLA formula for a latent model with intercept and user defined RW1
+formula_M <- y ~ f(time, model = RW1_model)
+
+# From earlier
+test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
+colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+
+res_M <- inla(formula_M, family = "gaussian", data = test_data)
+
+preds_M <- res_M$summary.fitted.values$mean
+plot_df_M <- data.frame(matrix(c(NSG_data, preds_M), ncol = 2))
+colnames(plot_df_M) <- c("sim_data", "preds")
+
+plot_M <- plot_realizations(plot_df_M, "Predictions with manually implemented RW1")
+
+#The standard RW1 model from INLA
+formula_I <- y ~ f(time, model = "rw1")
+res_I <- inla(formula_I, family = "gaussian", data = test_data)
+
+preds_I <- res_I$summary.fitted.values$mean
+plot_df_I <- data.frame(matrix(c(NSG_data, preds_I), ncol = 2))
+colnames(plot_df_I) <- c("sim_data", "preds")
+
+plot_I <- plot_realizations(plot_df_I, "Predictions with INLAs RW1")
+
+Comparison_figure <- ggarrange(plot_M, plot_I, ncol = 1)
+
+Comparison_figure
+
+summary(res_M)
+
+summary(res_I)
+
+```
+It seems to fit the data a lot worse than the default implementation. From the summaries we see that the intercept for the manual model is way off with a mean of $0.324$ and a standard deviation of $933358$, where as the INLA model gets a mean of $2$ with low standard deviation. Which is what it is supposed to be. I assume something went wrong with interpret theta or the prior specification. The precision in the INLA model is also a lot higher, which is desired.
+
+Some testing of where the mistakes are:
+```{r}
+x <- seq(from = -1000, to = 100000, by = 1000)
+y <- dgamma(x, shape = 1, rate = 0.00005)
+plot(x, y, main = "prior for tau")
+
+x <- seq(from = 1, to = 100000, by = 1000)
+y <- dgamma(x, shape = 1, rate = 0.00005, log = TRUE) + log(x)
+plot(x, y, main = "prior for gamma")
+```
+The priors seem quite good in my opinion, might also have misunderstood completely. Very possible.
 
 
 Sprøsmål:
-
+Should I scale the R-matrix when defining the precision matrix Q in the RW1? By geometric variance and so on 
 
 To do:
 Make use of the plot function everywhere - done
-Implement adaptive RW, maybe look at github og wakefield et al
+Implement adaptive RW, maybe look at github and wakefield et al
 Choose model criteria - somewhat done
-Write about INLA
-Use set.seed() to make results reproducible
+Write about INLA - not started
+Use set.seed() to make results reproducible - continuous need for this
+
+
+
+
+
+
+
+
+
+## Code for ARW1 from github Alekshin Guendel
+
+```{r}
+#The rgeneric inla function for user defined random effects, i e. a ARW1
+inla.rgeneric.bym2.model = function(
+    cmd = c("graph", "Q", "mu", "initial", "log.norm.const", "log.prior", 
+            "quit"),
+    theta = NULL)
+{
+    # Assume we are passed the following inputs
+    # n: the number of subdivisions (i.e. time points or regions)
+    # Q_star: the scaled structure matrix for the structured component
+    # gamma_tilde: the inverse eigenvalues of Q_star
+    # U_prec, alpha_prec: U and alpha parameters for precision PC prior
+    # U_phi, alpha_phi: U and alpha parameters for mixing parameter PC prior
+    
+    # for reference and potential storage for objects to
+    # cache, this is the environment of this function
+    # which holds arguments passed as `...` in
+    # `inla.rgeneric.define()`.
+    envir = parent.env(environment())
+    
+    interpret.theta = function() {
+        return(list(prec = exp(theta[1L]),
+                    phi = 1 / (1 + exp(-theta[2L]))))
+    }
+    
+    graph = function(){ return (Q()) }
+    
+    Q = function() { 
+        p = interpret.theta()
+        D = (1 / (1 - p$phi)) * diag(n) 
+        QQ = rbind(cbind(p$prec * D, -sqrt(p$phi * p$prec) * D),
+                   cbind(-sqrt(p$phi * p$prec) * D, Q_star + p$phi * D))
+        return (inla.as.sparse(QQ))
+    }
+    
+    mu = function() { return(numeric(0)) } 
+    
+    log.norm.const = function() { return (numeric(0)) } 
+    
+    log.prior = function() { 
+        p = interpret.theta()
+        
+        # Construct prior for the precision parameter
+        lambda_prec = -log(alpha_prec) / U_prec
+        prec_prior = log(lambda_prec) - log(2) - theta[1L] / 2 -
+            lambda_prec / sqrt(p$prec)
+        
+        # Construct prior for the mixing parameter phi
+        dU = sqrt(U_phi * sum(gamma_tilde - 1) -
+                      sum(log(1 + U_phi * (gamma_tilde - 1))))
+        lambda_phi = -log(1 - alpha_phi) / dU
+        d2 = p$phi * sum(gamma_tilde - 1) - 
+            sum(log(1 + p$phi * (gamma_tilde - 1)))
+        phi_prior = log(lambda_phi) + 2 * theta[2L] -
+            2 * log1p(exp(theta[2L])) - log(2) - log(d2) / 2 -
+            lambda_phi * sqrt(d2) +
+            log(abs(sum( (gamma_tilde - 1) ^ 2 /
+                             (1 + exp(theta[2L]) * gamma_tilde))))
+        
+        return(prec_prior + phi_prior)
+            
+    } 
+    
+    initial = function() { return(c(4, 0)) }
+    
+    quit = function() { return (invisible()) }
+    
+    if (!length(theta)) theta = initial()
+    val = do.call(match.arg(cmd), args = list())
+    return (val) 
+}
+
+# ------ The following is my work trying to understand the code -------
+?do.call
+?match.arg
+#I believe the match.arg(cmd) are all the values we are interested in
+# which were defined as functions with no arguments further up
+# or by arguments passed globally to the function as specified at the top,
+# so, val = c("graph","Q","mu","initial","log.norm.const","log.prior","quit")
+#I assume these quantities are needed later?
+?inla.rgeneric.bym2.model
+```
+
+
+```{r}
+#might need these, dont know
+library(SUMMER)
+library(readstata13)
+library(dplyr)
+
+vignette()
+
+#### Get smoothed direct estimates w/ time fixed effect, adaptive bym2 ####
+# Create structure matrices
+conflict_years <- 1993:1999 - 1984
+conflict_years_long <- rep(0, num_years)
+conflict_years_long[conflict_years] <- 1
+
+R_conflict <- matrix(0, num_years, num_years)
+R_nonconflict <- matrix(0, num_years, num_years)
+for(i in 1:num_years){
+  if(i == 1){
+    if(conflict_years_long[i] || conflict_years_long[i + 1]){
+      R_conflict[i, i] <- 1
+    }
+    else{
+      R_nonconflict[i, i] <- 1
+    }
+  }
+  else if(i == num_years){
+    if(conflict_years_long[i] || conflict_years_long[i - 1]){
+      R_conflict[i, i] <- 1
+    }
+    else{
+      R_nonconflict[i, i] <- 1
+    }
+  }
+  else{
+    if(conflict_years_long[i]|| (conflict_years_long[i - 1] && 
+                                 conflict_years_long[i + 1])){
+      R_conflict[i, i] <- 2
+      
+    }
+    else if(conflict_years_long[i - 1] || conflict_years_long[i + 1]){
+      R_conflict[i, i] <- 1
+      R_nonconflict[i, i] <- 1
+    }
+    else{
+      R_nonconflict[i, i] <- 2
+    }
+  }
+  
+  for(j in 1:num_years){
+    if(abs(i - j) == 1){
+      if(conflict_years_long[i] || conflict_years_long[j]){
+        R_conflict[i, j] <- -1
+      }
+      else{
+        R_nonconflict[i, j] <- -1
+      }
+    }
+  }
+}
+
+R_1 <- R_nonconflict
+R_2 <- R_conflict
+scaled_Q <- INLA:::inla.scale.model.bym.internal(R_1 + R_2, 
+                                                 adjust.for.con.comp = TRUE)$Q
+gv <- scaled_Q[1, 1] / (R_1 + R_2)[1, 1]
+R_1_star <- gv * R_1
+R_2_star <- gv * R_2
+vals <- (1:num_years)[-num_years]
+R_1_star_hat <- R_1_star[vals, vals]
+R_2_star_hat <- R_2_star[vals, vals]
+eps <- eigen(solve(R_1_star_hat + R_2_star_hat) %*% R_2_star_hat)$values
+gamma_tilde <- c(1 / eigen(R_1_star + R_2_star)$values[1:(num_years - 1)], 0)
+save(R_1_star, R_2_star, eps, gamma_tilde,
+     file = "../Data/generated_data/structure_matrices.RData")
+
+# Specify PC prior hyperparameters
+pc.u.theta <- 0.75
+pc.alpha.theta <- 0.75
+
+# Fit model 
+adaptive_bym2_model <- 
+  INLA::inla.rgeneric.define(model = inla.rgeneric.adaptive.bym2.model, 
+                             n = num_years, R_1_star = R_1_star, 
+                             R_2_star = R_2_star, gamma_tilde = gamma_tilde, 
+                             eps = eps, U_prec = pc.u, alpha_prec = pc.alpha, 
+                             U_phi = pc.u.phi, alpha_phi = pc.alpha.phi,
+                             U_theta = pc.u.theta, 
+                             alpha_theta = pc.alpha.theta)
+constr <- list(A = matrix(c(rep(0, num_years), rep(1, num_years)), 
+                          nrow = 1, ncol = 2 * num_years), e = 0)
+mod <- logit.est ~ time  +
+  f(region.struct, model = adaptive_bym2_model, 
+    diagonal = 1e-06, extraconstr = constr, n = 2 * num_years) +
+  f(survey.id,  model = "iid", hyper = hyperpc1)
+options <- list(dic = TRUE, mlik = TRUE, cpo = TRUE, 
+                openmp.strategy = "default", return.marginals.predictor = TRUE)
+control.inla <- list(strategy = "adaptive", int.strategy = "auto")
+fit_adaptive_linear <- 
+  INLA::inla(mod, family = "gaussian", control.compute = options, 
+             data = dat, 
+             control.predictor = list(compute = TRUE), 
+             control.family = 
+               list(hyper =  list(prec = list(initial = log(1), 
+                                              fixed = TRUE))), 
+             scale = dat$logit.prec, 
+             control.inla = control.inla, verbose = FALSE)
+
+out_adaptive_linear <- dat %>% select(region, years) %>%
+  mutate(median = NA, lower = NA, upper = NA, logit.median = NA,
+         logit.lower = NA, logit.upper = NA)
+for (i in 1:nrow(dat)) {
+  tmp.logit <- 
+    INLA::inla.rmarginal(1e+05, 
+                         fit_adaptive_linear$marginals.fitted.values[[i]])
+  tmp <- expit(tmp.logit)
+  out_adaptive_linear$median[i] <- median(tmp)
+  out_adaptive_linear$lower[i] <- quantile(tmp, probs = 0.05)
+  out_adaptive_linear$upper[i] <- quantile(tmp, probs = 0.95)
+  out_adaptive_linear$logit.median[i] <- median(tmp.logit)
+  out_adaptive_linear$logit.lower[i] <- quantile(tmp.logit, probs = 0.05)
+  out_adaptive_linear$logit.upper[i] <- quantile(tmp.logit, probs = 0.95)
+}
+
+out_adaptive_bym2 <- out_adaptive_linear %>%
+  filter(is.na(years))
+
+smoothed_direct_adaptive_bym2$fit <- fit_adaptive_linear
+smoothed_direct_adaptive_bym2$model <- mod
+
+out_combined <- rbind(cbind(out_bym2, prior = "bym2"),
+                      cbind(out_adaptive_bym2, prior = "adaptive bym2"))
+
+
+# ------ The following is my work trying to understand the code -------
+#first part is computing the structure and precision matrices, and scaled
+# A lot of parameters and priors etc, then we define the ARW1 and include
+# it in the formula for the inla call. Also a sum to zero constraint maybe?
+# After the model call I am not sure whats happening.
+```
+
+
 
 
 
