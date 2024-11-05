@@ -418,7 +418,7 @@ plot_realizations(SG_dataframe[, 1:5], "Simulated shocked Gaussian data with N=5
 As this is somewhat complicated and new to me, I will start by a slightly easier example, namely the RW1. Can then also compare it to the already defined RW1 in INLA to ensure it works as intended. First some basic theory on defining random effects in INLA from https://becarioprecario.bitbucket.io/inla-gitbook/ch-newmodels.html .
 
 ### Defining new latent random effects in INLA
-New latent effects must be specified as GMRFs. So we need $\mu$, $Q$ and $\theta$ and its log-priors and initial values. Also need a graph, which I think can just be $Q$ as well, and some log-normalizing constant. As $\theta$ is parametrized as $\theta_1 = log(\tau)$ and $\theta_2 = logit(\rho) $ where $\tau$ is the precision and $\rho$ is the spacial dependence, which I think we define to be $1$.
+New latent effects must be specified as GMRFs. So we need $\mu$, $Q$ and $\theta$ and its log-priors and initial values. Also need a graph, which I think can just be $Q$ as well, and some log-normalizing constant. As $\theta$ is parametrized as $\theta_1 = \log(\tau)$ and $\theta_2 = \text{logit}(\rho)$ where $\tau$ is the precision and $\rho$ is the spatial dependence, which I think we define to be $1$.
 
 ```{r}
 library(INLA)
@@ -462,10 +462,6 @@ somemodel.model <- inla.rgeneric.define(inla.rgeneric.somemodel, W = W)
 
 ```
 
-
-
-
-
 ### Implementing RW1 in INLA
 In a RW1 we only have one hyperparameter, namely $\tau$. So we get $\theta = \text{log}(\tau)$ and the precision matrix is defined previously. Lets first define the inla.rgeneric function with all its necessary subfunctions.
 ```{r}
@@ -501,9 +497,9 @@ inla.rgeneric.RW1.model = function(
   
   log.prior <- function() {#default: shape = 1, rate = 0.00005
     p <- interpret_theta()
-    prior <- dgamma(p$prec, shape = 1 , rate = 0.00005 , log = TRUE) + p$prec
+    prior <- dgamma(p$prec, shape = 1, rate = 0.00005, log = TRUE) + theta[1L]
     return(prior)
-  } #could maybe just add theta instead of log(prec)
+  }
   
   quit <- function() {return(invisible())}
   
@@ -517,16 +513,19 @@ inla.rgeneric.RW1.model = function(
 N <- 50 #is defined further up as well
 RW1_model <- inla.rgeneric.define(inla.rgeneric.RW1.model, N = N)
 ```
+When setting mu = 0, that should be the same as enforcing a sum to zero constariant. 
 
 Lets test if it works as intended on some data from earlier.
 ```{r}
 #The INLA formula for a latent model with intercept and user defined RW1
-formula_M <- y ~ f(time, model = RW1_model)
+formula_M <- y ~ f(time, model = RW1_model,
+                extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
 
 # From earlier
 test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
 colnames(test_data) <- c("y", "time") #makes the colnames match the formula
 
+set.seed(47)
 res_M <- inla(formula_M, family = "gaussian", data = test_data)
 
 preds_M <- res_M$summary.fitted.values$mean
@@ -553,7 +552,11 @@ summary(res_M)
 
 summary(res_I)
 
+sum(res_M$summary.random$time$mean) # checks the sum of the random effects
+#not exactly 0, but quite close
 ```
+The INLA with manual RW1 sometimes breaks down, maybe 1 in 4 times, so I am trying to fix a seed to guarantee I get a result. Seems to work everytime with set.seed(46), apparently not consistent now either.
+
 It seems to fit the data a lot worse than the default implementation. From the summaries we see that the intercept for the manual model is way off with a mean of $0.324$ and a standard deviation of $933358$, where as the INLA model gets a mean of $2$ with low standard deviation. Which is what it is supposed to be. I assume something went wrong with interpret theta or the prior specification. The precision in the INLA model is also a lot higher, which is desired.
 
 Some testing of where the mistakes are:
@@ -568,9 +571,260 @@ plot(x, y, main = "prior for gamma")
 ```
 The priors seem quite good in my opinion, might also have misunderstood completely. Very possible.
 
+## Implementing the adaptive RW1 in INLA
+Need a function to calculate the geometric variance as defined in overleaf, and use the function ginv from the MASS library to compute the general inverse. Then we also need to compute the scaled structure matrices R1_star and R2_star which we need as inputs for the adaptive random walk.
+
+```{r}
+library("MASS")
+
+geometric_varience <- function(R) {
+  #Input: R is a square structure matrix, often sparse
+  N <- dim(R)[1]
+  GV <- exp(1 / N * sum(log(diag(ginv(R)))))
+  return(GV)
+}
+
+Scaled_structure_matrices_for_ARW1 <- function(N, conflict_years) {
+  R1 <- matrix(0, nrow = N, ncol = N) #should be N = 50, non-conflict
+  R2 <- matrix(0, nrow = N, ncol = N) #should be N = 50, conflict
+  for( i in 1:(N - 1)){
+    if(i %in% conflict_years | (i + 1) %in% conflict_years) {
+      R2[c(i, i+1), c(i, i+1)] <- R2[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
+    }
+    else {
+      R1[c(i, i+1), c(i, i+1)] <- R1[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
+    }
+  }
+  gv <- geometric_varience(R1 + R2)
+  return(list(R1 = R1/gv, R2 = R2/gv))
+}
+
+R_star_list <- Scaled_structure_matrices_for_ARW1(10, c(3, 4, 5))
+R_star_list$R1
+```
+
+TO DO:
+Compute R1 and R2, scale it and pass them as arguments
+Figure out if anything is different with 2 parameters, maybe not?
+Compute the combined log-prior 
+```{r}
+inla.rgeneric.AdaptiveRW1.model = function(
+  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
+  theta = NULL)
+{
+  #Input:
+  #N is the number of timepoints
+  #R_star_list contains R1_star and R2_star, the scaled structure matrices
+  
+  envir = parent.env(environment())
+  
+  interpret_theta <- function() { return(list(tau1 = exp(theta[1L]), 
+                                              tau2 = exp(theta[2L])))}
+  
+  graph <- function() {return(Q())}
+  
+  Q <- function() {
+    p <- interpret_theta()
+    Q_mat <- R_star_list$R1 * p$tau1 + R_star_list$R2 * p$tau2
+    return(inla.as.sparse(Q_mat)) #sparse representation
+  }
+  
+  mu <- function() {return(numeric(0))}
+  
+  #Need to find a good initial value for theta on the log-scale
+  initial <- function() {return(c(4, 4))}#I think 4 is default val for precision
+  
+  #INLA will calculate the constant when numeric(0) is returned
+  log.norm.const <- function() {return(numeric(0))}
+  
+  log.prior <- function() {#default: shape = 1, rate = 0.00005??
+    p <- interpret_theta()
+    prior <- dgamma(p$tau1, shape = 1, rate = 0.00005, log = TRUE) + theta[1L]+
+             dgamma(p$tau2, shape = 1, rate = 0.00005, log = TRUE) + theta[2L]
+    return(prior)
+  }
+  
+  quit <- function() {return(invisible())}
+  
+  #to ensure theta is defined
+  if (!length(theta)) theta = initial()
+  
+  vals <- do.call(match.arg(cmd), args = list())
+  return(vals)
+}
+
+typeof(R_star_list[1])
+N <- 50 #is defined further up as well
+conf_years <- 20:30 #as in the generated data further up
+R_star_list <- Scaled_structure_matrices_for_ARW1(N, conf_years)
+ARW1_model <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
+                                  N = N, R_star_list = R_star_list)
+
+#Some testing for non-shocked data
+#The INLA formula for a latent model with intercept and user defined RW1
+formula_M_RW1 <- y ~ f(time, model = RW1_model,
+                extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
+
+# From earlier
+test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
+colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+
+set.seed(47)
+res_M <- inla(formula_M_RW1, family = "gaussian", data = test_data)
+
+preds_M <- res_M$summary.fitted.values$mean
+plot_df_M <- data.frame(matrix(c(NSG_data, preds_M), ncol = 2))
+colnames(plot_df_M) <- c("sim_data", "preds")
+
+plot_M <- plot_realizations(plot_df_M, "Predictions with manual RW1")
+
+#The adaptive RW1
+formula_ARW1 <- y ~ f(time, model = ARW1_model,
+                  extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
+res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = test_data)
+
+preds_ARW1 <- res_ARW1$summary.fitted.values$mean
+plot_df_ARW1 <- data.frame(matrix(c(NSG_data, preds_ARW1), ncol = 2))
+colnames(plot_df_ARW1) <- c("sim_data", "preds")
+
+plot_ARW1 <- plot_realizations(plot_df_ARW1, "Predictions with manual adaptive RW1")
+
+Comparison_figure <- ggarrange(plot_M, plot_ARW1, ncol = 1)
+
+Comparison_figure
+
+#summary(res_M)
+
+#summary(res_ARW1)
+
+
+figure_list[[1]] <-  Comparison_figure
+
+#Some testing for shocked data
+figure_list <- list()
+for( i in 1:5) {
+  
+  test_data <- data.frame(matrix(c(SG_dataframe[, i], 1:N), nrow = N, ncol = 2)) 
+  colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+  
+  set.seed(47)
+  res_M <- inla(formula_M_RW1, family = "gaussian", data = test_data)
+  
+  preds_M <- res_M$summary.fitted.values$mean
+  plot_df_M <- data.frame(matrix(c(SG_dataframe[, i], preds_M), ncol = 2))
+  colnames(plot_df_M) <- c("sim_data", "preds")
+  
+  plot_M <- plot_realizations(plot_df_M, "Predictions with manual RW1")
+  
+  #The adaptive RW1
+  res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = test_data)
+  
+  preds_ARW1 <- res_ARW1$summary.fitted.values$mean
+  plot_df_ARW1 <- data.frame(matrix(c(SG_dataframe[, i], preds_ARW1), ncol = 2))
+  colnames(plot_df_ARW1) <- c("sim_data", "preds")
+  
+  plot_ARW1 <- plot_realizations(plot_df_ARW1, "Predictions with manual adaptive RW1")
+  
+  figure_list[[i]] <- ggarrange(plot_M, plot_ARW1, ncol = 1)
+}
+figure_list[1]
+figure_list[2]
+figure_list[3]
+figure_list
+```
+
+
+### Copy AR1 from a tutoriol to see if it works
+
+```{r}
+inla.rgeneric.AR1.model = function(cmd = c("graph", "Q", "mu", "initial", "log.norm.const", "log.prior", "quit"), theta = NULL)
+{
+envir = parent.env(environment())
+
+interpret.theta = function() {
+  return(list(prec = exp(theta[1L]), 
+              rho = 2 * exp(theta[2L])/(1 + exp(theta[2L])) - 1))
+}
+
+graph = function(){return(Q())}
+
+Q = function() {
+  p = interpret.theta()
+  Q = p$prec/(1 - p$rho**2) *
+  toeplitz(c(1 + p$rho**2, -p$rho, rep(0, n - 2L)))
+  Q[1, 1] = Q[n, n] = p$prec/(1 - p$rho**2)
+  return (inla.as.sparse(Q))
+}
+
+mu = function() {return(numeric(0))}
+
+log.norm.const = function() {return(numeric(0))}
+
+log.prior = function() {
+  p = interpret.theta()
+  val = dgamma(p$prec, shape = 1, rate = 1, log=TRUE) + theta[1L] +
+  dnorm(theta[2L], mean = 0, sd = 1, log=TRUE)
+  return (val)
+}
+
+initial = function() {return(rep(1, 2))}
+
+quit = function() {return(invisible())}
+
+if (!length(theta)) theta = initial()
+
+val = do.call(match.arg(cmd), args = list())
+return (val)
+}
+
+N <- 50 #is defined further up as well
+AR1_model <- inla.rgeneric.define(inla.rgeneric.AR1.model, n = N)
+
+
+#The INLA formula for a latent model with intercept and user defined AR1
+formula_M <- y ~ f(time, model = AR1_model)
+                #extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
+
+# From earlier
+test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
+colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+
+set.seed(47)
+res_M <- inla(formula_M, family = "gaussian", data = test_data)
+
+preds_M <- res_M$summary.fitted.values$mean
+plot_df_M <- data.frame(matrix(c(NSG_data, preds_M), ncol = 2))
+colnames(plot_df_M) <- c("sim_data", "preds")
+
+plot_M <- plot_realizations(plot_df_M, "Predictions with manually implemented AR1")
+
+#The standard RW1 model from INLA
+formula_I <- y ~ f(time, model = "rw1")
+res_I <- inla(formula_I, family = "gaussian", data = test_data)
+
+preds_I <- res_I$summary.fitted.values$mean
+plot_df_I <- data.frame(matrix(c(NSG_data, preds_I), ncol = 2))
+colnames(plot_df_I) <- c("sim_data", "preds")
+
+plot_I <- plot_realizations(plot_df_I, "Predictions with INLAs RW1")
+
+Comparison_figure <- ggarrange(plot_M, plot_I, ncol = 1)
+
+Comparison_figure
+
+summary(res_M)
+
+summary(res_I)
+```
+The manual AR1 appears to break down every time, so there might have been some updates to INLA which makes this way of defining random effects break down, however the manual RW1 worked sometimes, although the returned model performed quite bad and no where close to INLA's implementation. 
+
 
 Sprøsmål:
 Should I scale the R-matrix when defining the precision matrix Q in the RW1? By geometric variance and so on 
+When a return numeric(0) for the mean, will that guarantee that it sums to zero?
+What should I use as my prior for precision parameters?
+
+
 
 To do:
 Make use of the plot function everywhere - done
@@ -578,6 +832,8 @@ Implement adaptive RW, maybe look at github and wakefield et al
 Choose model criteria - somewhat done
 Write about INLA - not started
 Use set.seed() to make results reproducible - continuous need for this
+
+Should pass, for instance the Q, to the INLA function to avoid computing it inside the function every the model is trained for new data.
 
 
 
@@ -673,7 +929,7 @@ inla.rgeneric.bym2.model = function(
 ```
 
 
-```{r}
+```{r, eval=FALSE}
 #might need these, dont know
 library(SUMMER)
 library(readstata13)
@@ -1023,7 +1279,7 @@ inla.models()$latent$iid$hyper
 ```
 
 Assign your own prior
-```{r}
+```{r, eval=FALSE}
 # use suitable support points x
 lprec = seq( -10, 10, len =100)
 
@@ -1040,7 +1296,7 @@ $$
 $$
 $\alpha_i$ follows a $N(0, \tau_{\alpha})$ where $tau_{\alpha}$ is known. $Ind_j$ and $\beta_{jk}$ are the same with gamma hyperpriors on their respective precisions.
 
-```{r}
+```{r, eval=FALSE}
 data(Epil)
 head(Epil,n =3)
 
@@ -1056,7 +1312,7 @@ result = inla(formula, family ="poisson", data = Epil,
   control.fixed = list(prec.intercept = 0.001 , prec = 0.001))
 ```
 In the control.fixed above prec.intercept is just for the intercept precision while prec is for all other fixed effects. control.predictor can compute posterior marginals for linear predictors with compute, and apply linear transformations with A. control.compute can compute measures of fit, like dic, mlik and cpo. Also many other control statements. This is done below.
-```{r}
+```{r, eval=FALSE}
 result = inla(formula, #some formula
           data = data, #some data
           control.compute = list(mlik = TRUE)) #Computes the marginal likelihood
@@ -1075,7 +1331,7 @@ Prob(Y_i \leq y_i^{obs}|\mathbf{y}_{-i})
 $$
 
 There are several tools to extend these standard models like replicate and group, multiple likelihoods, copy, linear transformation of $\eta$ (A matrix), linear combinations, values and remote computing. Replicate simulates the random effects the requested number of times as  f(..., replicate = r [, nrep = nr ]). 
-```{r}
+```{r, eval=FALSE}
 #need to define i and r manually
 formula = y ~ f(i , model ="ar1", replicate =r) + intercept -1
 result = inla(formula, family = "poisson",
@@ -1083,7 +1339,7 @@ result = inla(formula, family = "poisson",
 ```
 Similar with groups, but these are for structured random effects, like RW1, used by  f(..., group = g [, ngroup = ng]). Looks quite strange, but for a RW2, it connects a points not only to the 2 next and 2 previous points, but also the five closest points on every other RW2.
 When our data follows multiple likelihoods, we can structure the response y as a matrix or list, and apply a specific likelihood to each part of the list. Probably different hyperparameteres for each likelihood. 
-```{r}
+```{r, eval=FALSE}
 # With Y as a matrix with NA when the row is in another group, so only one 
 # non NA per row, groups as columns
 result = inla ( formula = Y ~ 1 + x ,
@@ -1099,11 +1355,12 @@ Can also apply a linear transformation A to $\eta$:
 $$
 \eta^* = A\eta \text{ with }  y_i \sim \pi (y_i | \eta_i^* , \theta)
 $$
-```{r} 
+
+```{r, eval=FALSE} 
 result = inla(formula, ... , control.predictor = list(A = A))
 ```
 Can sometimes simplify the model and can be interchangeable with the copy feature sometimes. Can also do it as below.
-```{r}
+```{r, eval=FALSE}
 # Alternative construction
 A = cbind(rep(1 , n), x)
 x1 = c(1, 0) ; x2 = c(0, 1)
@@ -1115,7 +1372,7 @@ result = inla ( formula = y ~ x1 + x2 - 1,
 ```
 
 We might improve the model by using a linear combination of the latent field, like $v = Bx$ for some matrix $B$. Ideally we then use the vector $\hat{x} = [x, c]$, but this gives a much denser (less sparse) precision matrix. Can instead approximate. 
-```{r}
+```{r, eval=FALSE}
 n = 100
 x = rnorm(n)
 z = rnorm(n)
@@ -1141,7 +1398,7 @@ r$summary.lincomb.derived
 ```
 
 RW2 with unobserved points in the middle
-```{r}
+```{r, eval=FALSE}
 # Generate data set
 y = cumsum(cumsum(rnorm(100, sd =0.01)))+ rnorm (100 , sd = 0.1)
 y = y[c(1:30 , 70:100)]
