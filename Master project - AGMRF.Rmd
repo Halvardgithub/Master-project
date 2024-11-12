@@ -9,93 +9,14 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Simulation of a GMRF - random walks
-
-
-## Random walk 1
-For the random walk 1 we have a diagonal precision matrix with $2$ on the diagonal and $-1$ on the neighboring diagonals. The first and last elements on the diagonal are set to $1$, so all rows sum to $0$. $k$ is some scale constant. We also assume a zero mean, but adding a different mean is just a location shift.
-
-```{r, eval=FALSE}
-#Creating the structure matrix
-n = 4
-R <- diag(2, n)
-R[abs(row(R) - col(R)) == 1] <- -1
-R[1, 1] <- 1
-R[n, n] <- 1
-
-R
-
-k <- 1 #A constant connected top variance
-Q <- k*R
-mu <- rep(0, n)
-```
-
-Eigenvalues of R:
-$$
-\lambda_i = 2 - 2\text{cos}(\pi (i-1)/n), \quad i = 1, ..., n
-$$
-Tried sampling with Algorithm 3.1, does not appear to work as expected. Maybe its missing some constraint, like the sum of $x$ equals $0$, or something with my implementation.
-```{r, eval=FALSE}
-# Eigenvalues
-eigVecs <- eigen(Q, symmetric=TRUE) #Finds the eigenvectors
-
-eigVals <- rep(0, n)
-for(i in 2:n){
-  eigVals[i] <- (2 - 2*cos(pi*(i - 1)/n))*k #Finds the eigenvalues
-}
-
-EVInv <- rev(sqrt(1/eigVals))  #Invert and square root for scaling
-
-z <- rnorm(n-1) #Standard normal sample
-y <- rep(0, n-1)
-for(i in 1:(n-1)){
-  y[i] <- z[i] * EVInv[i] #Computes the ys
-}
-x <- rep(0, n)
-for(i in 1:(n-1)){
-  x <- x + y[i]*eigVecs$vectors[1+i, 1:n] 
-}
-
-
-```
-
-```{r, eval=FALSE}
-plot(1:n, x)
-```
-
-Another approach is to mimic the algorithms from the earlier sections, however our Q is singular
-```{r, eval=FALSE}
-A <- eigVecs$vectors[1, 1:n]
-Q_inv <- solve(Q)
-det(Q)
-
-Q_new <- Q + A%*%t(A)
-
-L <- t(chol(Q_new)) #The lower triangle cholesky decomp.
-z <- rnorm(n)
-v <- solve(t(L), z)
-
-
-
-Q_inv <- solve(Q_new)
-det(Q_new)
-
-x_adj <- x - Q_inv%*%A *solve(t(A)%*%Q_inv%*%A)*(t(A)%*%x)
-```
-
-
-
-
-
-For now only using code below this point, the above code does not work.
 
 ```{r}
 #Libraries
-library(ggplot2)
-library(tidyr)
-
+library(ggplot2) #plotting
+library(tidyr) #for pivot_longer?
 library(ggpubr)
-library(INLA)
+library(INLA) #posterior inference
+library("MASS") #for ginv
 ```
 
 ## Basic random walk
@@ -203,7 +124,6 @@ RW2_plot <- plot_realizations(df2, "RW2 with N=100", legend = FALSE)
 Visualize the plots.
 ```{r}
 RW_figure <- ggarrange(RW1_plot, RW2_plot, ncol = 1)
-
 RW_figure
 ```
 
@@ -245,6 +165,7 @@ sigma_obs <- 0.001
 sigma_rw <- 0.03
 mu <- 2
 NSG_dataframe <- sim_non_shocked_gaussian_dataframe(N, mu, sigma_obs, sigma_rw, n)
+NSG_dataframe$t <- 1:N #needed for random effects later
 
 #Visualizing some simulated data
 plot_realizations(NSG_dataframe[, 1:5], "Simulated non-shocked Gaussian data
@@ -255,7 +176,7 @@ plot_realizations(NSG_dataframe[, 1:5], "Simulated non-shocked Gaussian data
 For our actual simulation study we are interested in $N=50$ timepoints and 100 realizations. We will then fit a direct smooth model and an adaptive model to each realization and compare some model criteria, like DIC etc. 
 
 ### Root mean square eroor
-A common model criteria is the root mean square error, or RMSE. We define a function to calculate this below.
+A common model criteria is the root mean square error, or RMSE. We define a function to calculate this below. The lower RMSE the better.
 
 ```{r}
 RMSE <- function(data, preds){
@@ -268,7 +189,7 @@ From a paper by Gneiting and Raftery (2007).
 $$
 \text{LS}(p, \omega) = \text{log}p(\omega)
 $$
-where $p$ is the predicted distribution of a point, which we get from INLA, and $\omega$ is the observed value, which is the specific datapoint. We then take the average of the result for all the data points with unique prediction densities. The higher average proper LS the better.
+where $p$ is the predicted distribution of a point, which we get from INLA, and $\omega$ is the observed value, which is the specific datapoint. We then take the average of the score for all the data points. The higher average proper LS the better.
 
 ```{r}
 average_proper_LS <- function(res, data){
@@ -295,12 +216,10 @@ colnames(NSG_data) <- c("y", "time") #makes the colnames match the formula
 
 #The INLA model
 formula <- y ~ f(time, model = "rw1") #intercept is included automatically
-res <- inla(formula, family = "gaussian", data = NSG_data, 
-            control.compute = list(dic = TRUE, cpo = TRUE))
+res <- inla(formula, family = "gaussian", data = NSG_data)
 
 #For plotting the data and the predicted values
-preds <- res$summary.fitted.values$mean
-plot_df <- data.frame(matrix(c(NSG_dataframe[, 1], preds), ncol = 2))
+plot_df <- data.frame(matrix(c(NSG_dataframe[, 1], res$summary.fitted.values$mean), ncol = 2))
 colnames(plot_df) <- c("sim_data", "preds") #for legends in the plot
 
 plot_realizations(plot_df, "Simulated data and predicted values for non-shocked data")
@@ -336,7 +255,8 @@ Lets make some general functions for simulating shocked Gaussian data.
 ```{r}
 #function to simulate a shocked realization y
 sim_shocked_gaussian_data <- function(N, mu, sigma_obs, sigma_rw, t_start = 20, t_end = 30, mu_offset = 0.7, sigma_offset = 0.3){
-  #N timepoints, mean mu, and standard deviations observations and the RW1
+  #N timepoints, mean mu, and standard deviations for observations and the RW1
+  #t_start and t_end bound the offset area with specified mean and sd
   eta <- mu + Norm_RW1(sigma_rw, N)
   y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_obs))
   offset <- c(rep(0, t_start - 1),rnorm(t_end - t_start + 1, mu_offset, sigma_offset), rep(0, N - t_end))
@@ -355,36 +275,10 @@ sim_shocked_gaussian_dataframe <- function(N, mu, sigma_obs, sigma_rw, t_start =
 
 #Shocked Gaussian dataframe
 SG_dataframe <- sim_shocked_gaussian_dataframe(N, mu, sigma_obs, sigma_rw, n=n)
+SG_dataframe$t <- 1:N #needed for random effects later
 
 #Visualizing some simulated data
 plot_realizations(SG_dataframe[, 1:5], "Simulated shocked Gaussian data with N=50 and 5 realisations", legend = FALSE)
-```
-
-Lets now see how INLA performs on both shocked and non-shocked data when using the predefined RW1 in INLA.
-```{r}
-#Non-shocked data and inlas prediction for the smooth direct model
-formula <- y ~ f(time, model = "rw1") #intercept is included automatically
-
-test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
-colnames(test_data) <- c("y", "time") #makes the colnames match the formula
-res_NS <- inla(formula, family = "gaussian", data = test_data)
-preds_NS <- res_NS$summary.fitted.values$mean
-
-plot_df <- data.frame(matrix(c(NSG_data, preds_NS), ncol = 2))
-colnames(plot_df) <- c("sim_data", "preds")
-
-plot_realizations(plot_df, "Simulated data and predicted values for non-shocked data", "t", "y")
-
-#Shocked data and inlas prediction for the smooth direct model
-test_data <- data.frame(matrix(c(SG_data, 1:N), nrow = N, ncol = 2)) 
-colnames(test_data) <- c("y", "time") #makes the colnames match the formula
-res_S <- inla(formula, family = "gaussian", data = test_data)
-preds_S <- res_S$summary.fitted.values$mean
-
-plot_df <- data.frame(matrix(c(SG_data, preds_S), ncol = 2))
-colnames(plot_df) <- c("sim_data", "preds")
-
-plot_realizations(plot_df, "Simulated data and predicted values for shocked data", "t", "y")
 ```
 
 ## Implementing the adaptive random walk in the latent model in INLA
@@ -429,8 +323,6 @@ somemodel.model <- inla.rgeneric.define(inla.rgeneric.somemodel, W = W)
 ### Implementing RW1 in INLA
 In a RW1 we only have one hyperparameter, namely $\tau$. So we get $\theta = \text{log}(\tau)$ and the precision matrix is defined previously. Lets first define a function for the geometric variance, defined in the overleaf document, to scale the precision matrix. Use the function ginv from the library MASS to calculate the generalized inverse.
 ```{r}
-library("MASS")
-
 geometric_variance <- function(R) {
   #Input: R is a square structure matrix, often sparse
   N <- dim(R)[1]
@@ -439,85 +331,37 @@ geometric_variance <- function(R) {
 }
 ```
 
-
 Then, lets define the inla.rgeneric function with all its necessary subfunctions.
 ```{r}
-inla.rgeneric.RW1_from_adaptive.model = function(
-  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
-  theta = NULL)
-{
-  #Input:
-  #N is the number of timepoints
-  #R_star_list contains R1_star and R2_star, the scaled structure matrices
-  
-  envir = parent.env(environment())
-  
-  interpret_theta <- function() { return(list(tau1 = exp(theta[1L])))}
-  
-  graph <- function() {return(Q())}
-  
-  Q <- function() {
-    p <- interpret_theta()
-    Q_mat <- R_star_list$R1 * p$tau1 + R_star_list$R2 * p$tau1
-    return(inla.as.sparse(Q_mat)) #sparse representation
-  }
-  
-  mu <- function() {return(numeric(0))}
-  
-  #Need to find a good initial value for theta on the log-scale
-  initial <- function() {return(4)}#Default initial for precisions
-  
-  #INLA will calculate the constant when numeric(0) is returned
-  log.norm.const <- function() {return(numeric(0))}
-  
-  log.prior <- function() {#default: shape = 1, rate = 0.00005
-    p <- interpret_theta()
-    prior <- dgamma(p$tau1, shape = 1, rate = 0.00005, log = TRUE) + theta[1L]
-    return(prior) 
-  } # the theta terms come from the transformation of variable to the log scale
-  
-  quit <- function() {return(invisible())}
-  
-  #to ensure theta is defined
-  if (!length(theta)) theta = initial()
-  
-  vals <- do.call(match.arg(cmd), args = list())
-  return(vals)
-}
-
 inla.rgeneric.RW1.model = function(
   cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
   theta = NULL)
 {
   #Input:
   #N is the number of timepoints
+  #R_star is the scaled structure matrix
   
   envir = parent.env(environment())
   
-  interpret_theta <- function() { return(list(prec = exp(theta[1L])))}
+  interpret_theta <- function() { return(list(tau = exp(theta[1L])))}
   
   graph <- function() {return(Q())}
   
   Q <- function() {
     p <- interpret_theta()
-    dense_R <- toeplitz(c(2, -1, rep(0, N - 2)))#2 on diag and -1 on firstdiags
-    dense_R[1, 1] <- dense_R[N, N] <- 1 # 1 for first and last diag element
-    gv <- geometric_variance(dense_R)
-    scaled_R <- gv * dense_R * p$prec #scaling
-    return(inla.as.sparse(scaled_R)) #sparse representation
+    Q <- p$tau * R_star
+    return(inla.as.sparse(Q))
   }
   
   mu <- function() {return(numeric(0))}
   
-  #Need to find a good initial value for theta on the log-scale
   initial <- function() {return(4)}#default for precisions: initial = 4
   
-  #INLA will calculate the constant when numeric(0) is returned
-  log.norm.const <- function() {return(numeric(0))}
+  log.norm.const <- function() {return(numeric(0))} #Inla computes it
   
-  log.prior <- function() {#default: shape = 1, rate = 0.00005 for prec
+  log.prior <- function() {#default: shape = 1, rate = 0.00005 for tau
     p <- interpret_theta()
-    prior <- dgamma(p$prec, shape = 1, rate = 0.00005, log = TRUE) + theta[1L]
+    prior <- dgamma(p$tau, shape = 1, rate = 0.00005, log = TRUE) + theta[1L]
     return(prior)
   }
   
@@ -529,95 +373,55 @@ inla.rgeneric.RW1.model = function(
   vals <- do.call(match.arg(cmd), args = list())
   return(vals)
 }
+```
+
+We need to pass the function above the number of timepoints $N$ and the scaled structure matrix $R^*$. The scaled structure matrix for a RW1 is defined by the fucntion below, followed by some testing.
+
+```{r}
+Q <- function(N) {
+  # Input: N timepoints
+  R <- toeplitz(c(2, -1, rep(0, N - 2)))# 2 on diag and -1 on firstdiags
+  R[1, 1] <- R[N, N] <- 1 # 1 for first and last diag element
+  gv <- geometric_variance(R)
+  R_star <- gv * R 
+  return(R_star) #returns the scaled structure matrix for a RW1
+}
 
 N <- 50 #is defined further up as well
-RW1_model <- inla.rgeneric.define(inla.rgeneric.RW1.model, N = N)
-
-formula_M <- y ~ f(time, model = RW1_model,
-                  extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
-#res_M <- inla(formula_M, family = "gaussian", data = NSG_data, 
-#          control.inla = list(strategy = "adaptive", int.strategy = "auto"))
-
-RW1_model_from_adaptive <- inla.rgeneric.define(inla.rgeneric.RW1_from_adaptive.model, N=N, R_star_list = R_star_list)
-formula_Non_ARW1 <- y ~ f(time, model = RW1_model_from_adaptive,
-                  extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
-res_M <- inla(formula_Non_ARW1, family = "gaussian", data = NSG_data)
-summary(res_M)
+R_star <- Q(N) 
+RW1_model <- inla.rgeneric.define(inla.rgeneric.RW1.model, N = N, R_star = R_star)
 ```
-The RW1_model above is now a custom latent effect which can be included in INLA formulas to define models. Lets check if it works as intended on some data from earlier.
+
+The RW1_model above is now a custom latent effect which can be included in INLA formulas to define models. However, it is only defined for $N=50$, and we need to define separate ones for other $N$.Now, lets check if it works as intended on some data from earlier. Then we need to define the INLA formula where we add a constraint to enforce a sum to zero constraint as the model includes an intercept.
 ```{r}
 #The INLA formula for a latent model with intercept and user defined RW1
 formula_M <- y ~ f(time, model = RW1_model, extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
-
-# From earlier
-#test_data <- data.frame(matrix(c(NSG_data_test, 1:N), nrow = N, ncol = 2))
-#colnames(test_data) <- c("y", "time") #makes the colnames match the formula
-
-#res_M <- inla(formula_M, family = "gaussian", data = NSG_data)
-res_M <- inla(formula_Non_ARW1, family = "gaussian", data = NSG_data)
-
-preds_M <- res_M$summary.fitted.values$mean
-plot_df_M <- data.frame(matrix(c(NSG_data[, 1], preds_M), ncol = 2))
-colnames(plot_df_M) <- c("sim_data", "preds")
-
-plot_M <- plot_realizations(plot_df_M, "Predictions with manually implemented RW1")
+res_M <- inla(formula_M, family = "gaussian", data = NSG_data)
 
 #The standard RW1 model from INLA
 formula_I <- y ~ f(time, model = "rw1")
 res_I <- inla(formula_I, family = "gaussian", data = NSG_data)
 
-preds_I <- res_I$summary.fitted.values$mean
-plot_df_I <- data.frame(matrix(c(NSG_data[, 1], preds_I), ncol = 2))
-colnames(plot_df_I) <- c("sim_data", "preds")
+summary(res_M)
+summary(res_I)
 
-plot_I <- plot_realizations(plot_df_I, "Predictions with INLAs RW1")
-
-Comparison_figure <- ggarrange(plot_M, plot_I, ncol = 1)
-
-Comparison_figure
-
-#summary(res_M)
-#summary(res_I)
-
-sum(res_M$summary.random$time$mean) # checks the sum of the random effects
-#not exactly 0, but quite close
-
-
-
-
-formula_Non_ARW1 <- y ~ f(time, model = RW1_model_from_adaptive,
-                  extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
-res_M <- inla(formula_Non_ARW1, family = "gaussian", data = NSG_data)
-
-formula_I <- y ~ f(time, model = "rw1")
-res_I <- inla(formula_I, family = "gaussian", data = NSG_data)
-
-plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean)
-plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd)
-
-
+#plots to compare the model output
+plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean, main = "Comparison of the mean", xlab = "Manual RW1", ylab = "INlA's RW1")
+abline(0, 1)
+plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd, main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
+abline(0, 1)
 ```
-This appears to work well and similarly to INLAs implementation, however, I have not taken a closer look at model criteria and so on.
-
-Some exploring of the priors for different parameters.
-```{r}
-x <- seq(from = -1000, to = 100000, by = 1000)
-y <- dgamma(x, shape = 1, rate = 0.00005)
-plot(x, y, main = "prior for tau")
-
-x <- seq(from = 1, to = 100000, by = 1000)
-y <- dgamma(x, shape = 1, rate = 0.00005, log = TRUE) + log(x)
-plot(x, y, main = "prior for theta")
-
-
-```
-The priors seem quite good in my opinion, might also have misunderstood completely. Very possible.
+From the summaries it is clear they are very similar. However, not exactly equal, as for instance the mean of the Gaussian precision. This is supported by the plots of the means and standard deviations, which show that they are almost the same, but clearly not identical.
 
 ## Implementing the adaptive RW1 in INLA
-Need a function to calculate the geometric variance as defined in overleaf, and use the function ginv from the MASS library to compute the general inverse. Then we also need to compute the scaled structure matrices R1_star and R2_star which we need as inputs for the adaptive random walk.
+We now make the previous model more flexible by allowing for two different precisions in the random walk. The new precision is used for transitions involving conflict years which we define.So, we start by computing the scaled structure matrices R1_star and R2_star which we need as inputs for the adaptive random walk.
 
 ```{r}
 Scaled_structure_matrices_for_ARW1 <- function(N, conflict_years) {
+  #Input:
+  #N timepoints
+  #conflict_years is a list with the conflict years
+  
   R1 <- matrix(0, nrow = N, ncol = N) #should be N = 50, non-conflict
   R2 <- matrix(0, nrow = N, ncol = N) #should be N = 50, conflict
   for( i in 1:(N - 1)){
@@ -628,26 +432,19 @@ Scaled_structure_matrices_for_ARW1 <- function(N, conflict_years) {
       R1[c(i, i+1), c(i, i+1)] <- R1[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
     }
   }
-  gv <- geometric_variance(R1 + R2)
+  gv <- geometric_variance(R1 + R2) #scaling
   return(list(R1 = R1*gv, R2 = R2*gv))
 }
 
-R_star_list <- Scaled_structure_matrices_for_ARW1(10, c(3, 4, 5))
-#R_star_list$R1
-
+#testing
+R_star_list <- Scaled_structure_matrices_for_ARW1(7, c(3, 4, 5))
+R_star_list$R1
 R <- R_star_list$R1 + R_star_list$R2
+R
 
-geometric_variance(R)
-#inla.doc("rw1")
-#inla.scale.model
-#scatter plot for RW1 and manual RW1, should be linear, same for sd
-# so one as the x-axis and one as y-axis
 ```
 
-TO DO:
-Compute R1 and R2, scale it and pass them as arguments
-Figure out if anything is different with 2 parameters, maybe not?
-Compute the combined log-prior 
+Now, lets define the adaptive RW1.
 ```{r}
 inla.rgeneric.AdaptiveRW1.model = function(
   cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
@@ -666,16 +463,14 @@ inla.rgeneric.AdaptiveRW1.model = function(
   
   Q <- function() {
     p <- interpret_theta()
-    Q_mat <- R_star_list$R1 * p$tau1 + R_star_list$R2 * p$tau2
-    return(inla.as.sparse(Q_mat)) #sparse representation
+    Q <- R_star_list$R1 * p$tau1 + R_star_list$R2 * p$tau2
+    return(inla.as.sparse(Q)) #sparse representation
   }
   
   mu <- function() {return(numeric(0))}
   
-  #Need to find a good initial value for theta on the log-scale
   initial <- function() {return(c(4, 4))}#Default initial for precisions
   
-  #INLA will calculate the constant when numeric(0) is returned
   log.norm.const <- function() {return(numeric(0))}
   
   log.prior <- function() {#default: shape = 1, rate = 0.00005
@@ -683,7 +478,7 @@ inla.rgeneric.AdaptiveRW1.model = function(
     prior <- dgamma(p$tau1, shape = 1, rate = 0.00005, log = TRUE) + theta[1L]+
              dgamma(p$tau2, shape = 1, rate = 0.00005, log = TRUE) + theta[2L]
     return(prior) 
-  } # the theta terms come from the transformation of variable to the log scale
+  } #the theta terms come from the transformation of variables to the log scale
   
   quit <- function() {return(invisible())}
   
@@ -700,99 +495,52 @@ conf_years <- 20:30 #as in the generated data further up
 R_star_list <- Scaled_structure_matrices_for_ARW1(N, conf_years)
 ARW1_model <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
                                   N = N, R_star_list = R_star_list)
-
-#Some testing for non-shocked data
-#The INLA formula for a latent model with intercept and user defined RW1
-formula_M_RW1 <- y ~ f(time, model = RW1_model,
-                extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
-
-# From earlier
-#test_data <- data.frame(matrix(c(NSG_data, 1:N), nrow = N, ncol = 2)) 
-#colnames(test_data) <- c("y", "time") #makes the colnames match the formula
-
-res_M <- inla(formula_M_RW1, family = "gaussian", data = NSG_data)
-
-preds_M <- res_M$summary.fitted.values$mean
-plot_df_M <- data.frame(matrix(c(NSG_data, preds_M), ncol = 2))
-colnames(plot_df_M) <- c("sim_data", "preds")
-
-plot_M <- plot_realizations(plot_df_M, "Predictions with manual RW1")
-
-#The adaptive RW1
-formula_ARW1 <- y ~ f(time, model = ARW1_model,
-                  extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
-res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = NSG_data)
-
-preds_ARW1 <- res_ARW1$summary.fitted.values$mean
-plot_df_ARW1 <- data.frame(matrix(c(NSG_data, preds_ARW1), ncol = 2))
-colnames(plot_df_ARW1) <- c("sim_data", "preds")
-
-plot_ARW1 <- plot_realizations(plot_df_ARW1, "Predictions with manual adaptive RW1")
-
-Comparison_figure <- ggarrange(plot_M, plot_ARW1, ncol = 1)
-
-Comparison_figure
-
-summary(res_M)
-
-summary(res_ARW1)
-
 ```
 
-Some testing for shocked data.
+Lets do some testing for shocked data.
+
 ```{r}
-test_data <- data.frame(matrix(c(SG_dataframe[, 1], 1:N), nrow = N, ncol = 2)) 
-colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+#The INLA formula for a latent model with intercept and a RW1
+formula_I <- y ~ f(time, model = "rw1")
 
-res_M <- inla(formula_I, family = "gaussian", data = test_data)
-
-res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = test_data)
-
-summary(res_M)
-summary(res_ARW1)
-  
+#The INLA formula for an adaptive RW1
+formula_ARW1 <- y ~ f(time, model = ARW1_model,
+                  extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
 
 figure_list <- list()
 for( i in 1:5) {
   test_data <- data.frame(matrix(c(SG_dataframe[, i], 1:N), nrow = N, ncol = 2)) 
   colnames(test_data) <- c("y", "time") #makes the colnames match the formula
   
-  res_M <- inla(formula_I, family = "gaussian", data = test_data)
+  res_I <- inla(formula_I, family = "gaussian", data = test_data)
+  plot_df_I <- data.frame(matrix(c(SG_dataframe[, i], res_I$summary.fitted.values$mean), ncol = 2))
+  colnames(plot_df_I) <- c("sim_data", "preds")
   
-  preds_M <- res_M$summary.fitted.values$mean
-  plot_df_M <- data.frame(matrix(c(SG_dataframe[, i], preds_M), ncol = 2))
-  colnames(plot_df_M) <- c("sim_data", "preds")
-  
-  plot_M <- plot_realizations(plot_df_M, "Predictions with INLA's RW1")
+  plot_I <- plot_realizations(plot_df_I, "Predictions with INLA's RW1")
   
   #The adaptive RW1
   res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = test_data)
   
-  preds_ARW1 <- res_ARW1$summary.fitted.values$mean
-  plot_df_ARW1 <- data.frame(matrix(c(SG_dataframe[, i], preds_ARW1), ncol = 2))
+  plot_df_ARW1 <- data.frame(matrix(c(SG_dataframe[, i], res_ARW1$summary.fitted.values$mean), ncol = 2))
   colnames(plot_df_ARW1) <- c("sim_data", "preds")
   
-  plot_ARW1 <- plot_realizations(plot_df_ARW1, "Predictions with manual adaptive RW1")
+  plot_ARW1 <- plot_realizations(plot_df_ARW1, "Predictions with adaptive RW1")
   
-  figure_list[[i]] <- ggarrange(plot_M, plot_ARW1, ncol = 1)
+  figure_list[[i]] <- ggarrange(plot_I, plot_ARW1, ncol = 1)
 }
-
 figure_list
 ```
-
-Now, lets do some rigorous testing for the entire dataframes form earlier and evaluate them by the chosen model criterias, RMSE and LS. First lets compare the models for non-shocked Gaussian data.
+We observe that the standard RW1 struggles a lot with the first and third realization, and the rest of the plots seem nice.Now, lets do some rigorous testing for the entire dataframes form earlier and evaluate them by the chosen model criterias, RMSE and LS. First lets compare the models for non-shocked Gaussian data.
 ```{r}
 Model_eval_NSG <- data.frame(matrix(NA, nrow = n, ncol = 4))
 colnames(Model_eval_NSG) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
 
-#NSG_dataframe$t <- 1:N already has a t, maybe not
-
-formula_INLA <- y ~ f(time, model = "rw1") #intercept is included automatically
+formula_RW1 <- y ~ f(time, model = "rw1")
 for(i in 1:n){#iterate over each simulated realization
   test_data <- NSG_dataframe[, c(i, n + 1)] #gets the i-th realization and time
   colnames(test_data) <- c("y", "time") #makes the colnames match the formula
   
-  res_RW1 <- inla(formula_INLA, family = "gaussian", data = test_data)
+  res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data)
   LS_RW1 <- average_proper_LS(res_RW1, NSG_dataframe[, i])
   RMSE_RW1 <- RMSE(NSG_dataframe[, i], res_RW1$summary.fitted.values$mean )
   
@@ -804,8 +552,8 @@ for(i in 1:n){#iterate over each simulated realization
 }
 
 #boxplots of the differences
-boxplot(Model_eval_NSG["RMSE_RW1"] - Model_eval_NSG["RMSE_ARW1"],ylab = "RMSE")
-boxplot(Model_eval_NSG["LS_ARW1"] - Model_eval_NSG["LS_RW1"], ylab = "LS")
+#boxplot(Model_eval_NSG["RMSE_RW1"] - Model_eval_NSG["RMSE_ARW1"],ylab = "RMSE")
+#boxplot(Model_eval_NSG["LS_ARW1"] - Model_eval_NSG["LS_RW1"], ylab = "LS")
 
 myboxplot <- function(data, xlabel = "", ylabel = "") {
   df <- data.frame(d = data[,1])
@@ -815,23 +563,26 @@ myboxplot <- function(data, xlabel = "", ylabel = "") {
   return(BPlot)
 }
 
-plot_RMSE_NS <- myboxplot(Model_eval_NSG["RMSE_RW1"] - Model_eval_NSG["RMSE_ARW1"], "", "RMSE")
-plot_LS_NS <- myboxplot(Model_eval_NSG["LS_RW1"] - Model_eval_NSG["LS_ARW1"], "Non-shocked data", "LS")
+#Plotting
+plot_RMSE_RW1_NS <- myboxplot(Model_eval_NSG["RMSE_RW1"], "", "RMSE")
+plot_LS_RW1_NS <- myboxplot(Model_eval_NSG["LS_RW1"], "RW1", "LS")
+plot_RMSE_ARW1_NS <- myboxplot(Model_eval_NSG["RMSE_ARW1"], "", "")
+plot_LS_ARW1_NS <- myboxplot(Model_eval_NSG["LS_ARW1"], "ARW1", "")
+
+plot_eval_NS <- ggarrange(plot_RMSE_RW1_NS, plot_RMSE_ARW1_NS,plot_LS_RW1_NS, plot_LS_ARW1_NS, ncol = 2, nrow = 2)
+annotate_figure(plot_eval_NS, top = text_grob("Model evaluation for non-shocked Gaussian data")) #can add more parameters like size and color...
 ```
 
-
+Lets now test for shocked data.
 ```{r}
-Model_eval_SG <- data.frame(matrix(NA, nrow = n, ncol = 4)) # need to increase 2 later
+Model_eval_SG <- data.frame(matrix(NA, nrow = n, ncol = 4))
 colnames(Model_eval_SG) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
 
-SG_dataframe$t <- 1:N #adds the timecolumn
-
-formula_INLA <- y ~ f(time, model = "rw1") #intercept is included automatically
 for(i in 1:n){#iterate over each simulated realization
   test_data <- SG_dataframe[, c(i, n + 1)] #gets the i-th realization and time
   colnames(test_data) <- c("y", "time") #makes the colnames match the formula
   
-  res_RW1 <- inla(formula_INLA, family = "gaussian", data = test_data)
+  res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data)
   LS_RW1 <- average_proper_LS(res_RW1, SG_dataframe[, i])
   RMSE_RW1 <- RMSE(SG_dataframe[, i], res_RW1$summary.fitted.values$mean )
   
@@ -842,30 +593,35 @@ for(i in 1:n){#iterate over each simulated realization
   Model_eval_SG[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
 }
 #boxplots of the differences
-boxplot(Model_eval_SG["RMSE_RW1"] - Model_eval_SG["RMSE_ARW1"], ylab = "RMSE")
-boxplot(Model_eval_SG["LS_ARW1"] - Model_eval_SG["LS_RW1"], ylab = "LS")
+#boxplot(Model_eval_SG["RMSE_RW1"] - Model_eval_SG["RMSE_ARW1"], ylab = "RMSE")
+#boxplot(Model_eval_SG["LS_ARW1"] - Model_eval_SG["LS_RW1"], ylab = "LS")
 
+#check behavior for an outlier realization
 test_data <- SG_dataframe[, c(72, n + 1)] #gets the i-th realization and time
 colnames(test_data) <- c("y", "time")
 res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = test_data)
 
-average_proper_LS(res_ARW1, SG_dataframe[, 72])
-plot_realizations(data.frame(res_ARW1$summary.fitted.values$mean, SG_dataframe[, 72]), "hei")
+plot_realizations(data.frame(res_ARW1$summary.fitted.values$mean, SG_dataframe[, 72]), "")
 
 summary(res_ARW1)
 
-res_RW1 <- inla(formula_INLA, family = "gaussian", data = test_data)
-plot_realizations(data.frame(res_RW1$summary.fitted.values$mean, SG_dataframe[, 72]), "hei")
+res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data)
+plot_realizations(data.frame(res_RW1$summary.fitted.values$mean, SG_dataframe[, 72]), "")
 
-#box plots
-plot_RMSE_S <- myboxplot(Model_eval_SG["RMSE_RW1"] - Model_eval_SG["RMSE_ARW1"])
-plot_LS_S <- myboxplot(Model_eval_SG["LS_RW1"] - Model_eval_SG["LS_ARW1"], "Shocked data")
+#Plotting
+plot_RMSE_RW1_S <- myboxplot(Model_eval_SG["RMSE_RW1"], "", "RMSE")
+plot_LS_RW1_S <- myboxplot(Model_eval_SG["LS_RW1"], "RW1", "LS")
+plot_RMSE_ARW1_S <- myboxplot(Model_eval_SG["RMSE_ARW1"], "", "")
+plot_LS_ARW1_S <- myboxplot(Model_eval_SG["LS_ARW1"], "ARW1", "")
 
-ggarrange(plot_RMSE_NS, plot_RMSE_S, plot_LS_NS, plot_LS_S, ncol = 2, nrow = 2)
+plot_eval_NS <- ggarrange(plot_RMSE_RW1_S, plot_RMSE_ARW1_S,plot_LS_RW1_S, plot_LS_ARW1_S, ncol = 2, nrow = 2)
+annotate_figure(plot_eval_NS, top = text_grob("Model evaluation for shocked Gaussian data")) #can add more parameters like size and color...
 ```
-A positive RMSE means that ARW1 outperformed RW1 and a negative LS favors ARW1 over RW1. So, ARW1 is better for shocked data, and for some reason RW1 is better on non-shocked data. 
 
 
+
+check:
+maybe weird axis on line 633
 
 
 
@@ -875,19 +631,22 @@ When I return numeric(0) for the mean, will that guarantee that it sums to zero?
 What should I use as my prior for precision parameters?
 Burde jeg sette seed før INLA kall for reproducibility?
 
+inla.doc("rw1")
+inla.scale.model
+
 
 
 To do:
-Make use of the plot function everywhere - done
-Choose model criteria - somewhat done
 Write about INLA - not started
 Use set.seed() to make results reproducible - continuous need for this
   dont need to set the seed for INLA, should be deterministic. 
 
 Implementere logarithmic scoring. - done
 Sammenligne min RW1 med INLAs RW1 - min funker ikke, skrev om ARW1, den funker, men skjønner ingenting av hvorfor den ene ikke funker
-Sammenligne RW1 med ARW1 for SG and NSG by evaluating the criteria.
-Briefly describe the methids used in the overleaf, both for data and models.
+
+Briefly describe the methods used in the overleaf, both for data and models.
+Fikse RW1
+
 
 
 
@@ -899,7 +658,7 @@ Briefly describe the methids used in the overleaf, both for data and models.
 
 ## Code for ARW1 from github Alekshin Guendel
 
-```{r}
+```{r, eval=FALSE}
 #The rgeneric inla function for user defined random effects, i e. a ARW1
 inla.rgeneric.bym2.model = function(
     cmd = c("graph", "Q", "mu", "initial", "log.norm.const", "log.prior", 
@@ -1138,7 +897,7 @@ Y|\lambda \sim Poisson(E\lambda) \\
 $$
 Where $\bf{x}$ $\sim RW1(\tau)$ where we fix $E, \mu$ and $\tau$ for the simulations. When fitting models we will need to assign priors to them. 
 
-```{r}
+```{r, eval=FALSE}
 #Simulating non-shocked data
 
 #Parameters
@@ -1187,7 +946,7 @@ The code above seems to work fine, but should possibly tune some of the paramete
 Now the next step is to fit some models with INLA, we will start with the direct smoothed model. 
 ## Fitting the model with INLA
 
-```{r}
+```{r, eval=FALSE}
 #need to input the data as a dataframe with a y column and time column
 formula <- y ~ f(time, model = "rw1") #intercept is included automatically
 
@@ -1211,267 +970,6 @@ Seems like it works quite well, the posterior distributions align rather well wi
 
 
 
-
-
-The following is code from a PowerPoint on Inla by Andrea Riebler, as well as some additional testing and modification by myself.
-
-```{r}
-library(INLA)
-```
-
-
-A simple linear regression
-```{r}
-# Generate data
-x = sort(runif(100))
-y = 1 + 2*x + rnorm(n = 100, sd = 0.1)
-
-# Run inla
-formula = y ~ 1 + x
-result = inla( formula ,
-  data = list(x = x , y = y) ,
-  family = " gaussian ")
-
-# Get summary
-summary ( result )
-plot(result)
-
-m = result$marginals.fixed[[1]]
-plot(m)
-plot(inla.smarginal(m))
-```
-
-Adding a random effect
-```{r}
-# Generate AR (1) sequence
-t = 1:100
-ar = rep(0, 100)
-for(i in 2:100)
-  ar[i] = 0.8 *ar[i -1]+ rnorm(n = 1, sd = 0.1)
-
-# Generate data with AR (1) component
-x = runif(100)
-y = 1 + 2*x + ar + rnorm(n = 100 , sd = 0.1)
-
-# Run inla
-formula = y ~ 1 + x + f(t, model="ar1")
-result = inla(formula,
-  data = list(x = x, y = y, t = t) ,
-  family = "gaussian")
-
-# Get summary
-summary(result)
-```
-
-Prediction for an unobserved location
-```{r}
-# Add new location
-x = c(x , 0.3)
-t = c(t, 101)
-y = c(y , NA)
-
-# Re - compute
-result.pred = inla(formula,
-    data = list(x = x, t = t, y = y),
-    family = "gaussian",
-    control.predictor = list(compute = TRUE))
-
-#m = result$marginals.linear.predictor
-
-#m = result.pred$marginals.linear.predictor[[101]]
-#round (result.pred$summary.linear.predictor[101 ,], 3)
-
-#plot(m)
-#lines(inla.smarginal(m))
-```
-Virker ikke helt med den marginal linear predictor greia.
-
-Smooting binary time seires
-```{r}
-data ( Tokyo )
-head ( Tokyo )
-head ( Tokyo ,4)
-
-# Specify linear predictor
-formula = y ~ -1 + f(time , model ="rw2", cyclic = TRUE)
-
-# Run model
-result = inla(formula,
-    family = "binomial",
-    Ntrials = n,
-    data = Tokyo)
-
-plot(result)
-
-#Transform to probability
-result = inla ( formula,
-    family = "binomial",
-    Ntrials = n,
-    data = Tokyo,
-    control.predictor = list(compute = TRUE))
-plot(result)
-```
-
-Add weights to random components
-$formula = y \sim \mu + ... + f(idx, weight, model = ..., ...)$ makes the random effect term have a weight, from $\eta_i = ... + f_{idx_i}$ to $\eta_i = ... + weight_{idx_i}f_{idx_i}$. So, it adds a weight parameter.
-
-Changing the prior
-```{r}
-# Old way
-formula = y ~ f(idx, model = "iid", prior = "loggamma",
-    param = c(1, 0.1), initial = 4, fixed = FALSE)
-
-# New way
-hyper = list(prec = list(prior = "loggamma",
-    param = c(1, 0.1),
-    initial = 4,
-    fixed = FALSE))
-
-formula = y ~ f(idx,model = "iid", hyper = hyper) + ...
-
-inla.models()$latent$iid$hyper
-```
-
-Assign your own prior
-```{r, eval=FALSE}
-# use suitable support points x
-lprec = seq( -10, 10, len =100)
-
-# link the x and corresponding y values into a string which begins with " table :""
-#With some prior function 
-prior.table = INLA:::inla.paste(c("table:",cbind(lprec, prior.function(lprec))))
-
-hyper = list(prec = list(prior = prior.table))
-```
-
-Repeated poisson count:
-$$
-\text{log}(\mu_{jk}) = \alpha_0 + \alpha_1 \text{log}(Base_j/4) + \alpha_2TRT_j + \alpha_3 TRT_j \text{log}(Base_j/4) + \alpha_4 Age_j + \alpha_5 V4 + Ind_j + \beta_{jk}
-$$
-$\alpha_i$ follows a $N(0, \tau_{\alpha})$ where $tau_{\alpha}$ is known. $Ind_j$ and $\beta_{jk}$ are the same with gamma hyperpriors on their respective precisions.
-
-```{r, eval=FALSE}
-data(Epil)
-head(Epil,n =3)
-
-formula = y ~  Base*Trt + Age + V4 +
-          f(Ind, model ="iid",
-          hyper = list(prec = list(prior = "loggamma",
-          param = c(1, 0.01)))) +
-          f(rand, model ="iid",
-          hyper = list(prec = list(prior = "loggamma",
-          param = c(1, 0.01))))
-
-result = inla(formula, family ="poisson", data = Epil,
-  control.fixed = list(prec.intercept = 0.001 , prec = 0.001))
-```
-In the control.fixed above prec.intercept is just for the intercept precision while prec is for all other fixed effects. control.predictor can compute posterior marginals for linear predictors with compute, and apply linear transformations with A. control.compute can compute measures of fit, like dic, mlik and cpo. Also many other control statements. This is done below.
-```{r, eval=FALSE}
-result = inla(formula, #some formula
-          data = data, #some data
-          control.compute = list(mlik = TRUE)) #Computes the marginal likelihood
-
-# See result
-result$mlik
-result$dic$dic
-result$cpo$cpo
-result$cpo$pit
-
-
-```
-Can exchange mlik, marginal likelihood, with dic, Deviance information criteria, cpo, Conditional predictive ordinate or cpo for probability integral transform. DIC measures the trade-off between goodness of fit while trying to keep the model simple, ie. few parameters. CPO measures the fit with Bayesian hold on out cross validation for all data points. PIT:
-$$
-Prob(Y_i \leq y_i^{obs}|\mathbf{y}_{-i})
-$$
-
-There are several tools to extend these standard models like replicate and group, multiple likelihoods, copy, linear transformation of $\eta$ (A matrix), linear combinations, values and remote computing. Replicate simulates the random effects the requested number of times as  f(..., replicate = r [, nrep = nr ]). 
-```{r, eval=FALSE}
-#need to define i and r manually
-formula = y ~ f(i , model ="ar1", replicate =r) + intercept -1
-result = inla(formula, family = "poisson",
-    data = data.frame(y, i, r, intercept))
-```
-Similar with groups, but these are for structured random effects, like RW1, used by  f(..., group = g [, ngroup = ng]). Looks quite strange, but for a RW2, it connects a points not only to the 2 next and 2 previous points, but also the five closest points on every other RW2.
-When our data follows multiple likelihoods, we can structure the response y as a matrix or list, and apply a specific likelihood to each part of the list. Probably different hyperparameteres for each likelihood. 
-```{r, eval=FALSE}
-# With Y as a matrix with NA when the row is in another group, so only one 
-# non NA per row, groups as columns
-result = inla ( formula = Y ~ 1 + x ,
-          family = c("gaussian","gaussian") ,
-          data = list(Y = Y , x = x))
-
-```
-
-Copy allows us to use different elements of the same random effect, for example $x_i$ and $x_{i-1}$ if it doesent fit like an AR1 or RW2 or something predefined. The formula would then be: formula = y ~ f(i, model = "iid")
-+ f(i.plus, copy="i") + ... when $\eta_i = u_i + u_{i-1}$. I assume the .plus shifts the sequence one to the right or something. Can also scale the copy, like f(i.plus, copy="i", hyper = list(beta=list(fixed=FALSE))). 
-
-Can also apply a linear transformation A to $\eta$:
-$$
-\eta^* = A\eta \text{ with }  y_i \sim \pi (y_i | \eta_i^* , \theta)
-$$
-
-```{r, eval=FALSE} 
-result = inla(formula, ... , control.predictor = list(A = A))
-```
-Can sometimes simplify the model and can be interchangeable with the copy feature sometimes. Can also do it as below.
-```{r, eval=FALSE}
-# Alternative construction
-A = cbind(rep(1 , n), x)
-x1 = c(1, 0) ; x2 = c(0, 1)
-
-# Run model
-result = inla ( formula = y ~ x1 + x2 - 1,
-          data = list(y = y, x1 = x1, x2 = x2),
-          control.predictor = list(A = A))
-```
-
-We might improve the model by using a linear combination of the latent field, like $v = Bx$ for some matrix $B$. Ideally we then use the vector $\hat{x} = [x, c]$, but this gives a much denser (less sparse) precision matrix. Can instead approximate. 
-```{r, eval=FALSE}
-n = 100
-x = rnorm(n)
-z = rnorm(n)
-idx = 1:n
-eta = 5 + x + z + rnorm(n)
-formula = y ~ 1 + x + z + f(idx , model ="iid")
-y = rpois(n, lambda = exp(eta))
-
-# Define linear combinations
-# Get alpha _x - alpha _z
-lc1 = inla.make.lincomb(x =1, z = -1)
-names(lc1) = "lc1"
-
-# Get an average over all random effects
-lc2 = inla.make.lincomb(idx = rep(1/n , n))
-names(lc2)= "lc2"
-
-# Run inla
-r = inla(formula , "poisson", data = data.frame (y , x , z , idx ) ,
-      lincomb = c( lc1 , lc2 ), 
-      control.inla = list(lincomb.derived.correlation.matrix = TRUE ))
-r$summary.lincomb.derived
-```
-
-RW2 with unobserved points in the middle
-```{r, eval=FALSE}
-# Generate data set
-y = cumsum(cumsum(rnorm(100, sd =0.01)))+ rnorm (100 , sd = 0.1)
-y = y[c(1:30 , 70:100)]
-
-# Make time vector * and * value vector
-t = c (1:30 , 70:100)
-v = 1:100
-
-# Run inla
-#values is the time points
-result = inla(formula = y ~ f(t, model ="rw2", values =v, 
-          constr = FALSE ) -1 , data = list (y = y, t = t, v = v))
-
-plot(result)
-```
-
-Can also make INLA run on a remote server with some setup, use inla.call = "remote". Something about submit and retrieve, some sort of saving of the model?
-
-Useful tricks, set verbose = TRUE, will show size, optimizer steps and where it failed. Can also check result$logfile. 
 
 
 
