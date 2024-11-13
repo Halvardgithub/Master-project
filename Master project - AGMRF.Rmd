@@ -19,7 +19,8 @@ library(INLA) #posterior inference
 library("MASS") #for ginv
 ```
 
-## Basic random walk
+# Some theory
+## Random walk 1
 The easiest way to simulate a random walk is through the assumption of independent normal distributed increments. We know that '
 $$
 x_{t+1} | x_1, ..., x_t, \sigma = x_{t+1}|x_t, \sigma \sim N(x_t, \sigma^2)
@@ -78,19 +79,18 @@ for (i in 1:n){
   df[, i] <- RW1(sigma, N) 
 }
 
-# Plot all lines using ggplot
 RW1_plot <- plot_realizations(df, "RW1 with N=100", legend = FALSE)
-
 ```
 
-
 ## Random walk 2
-
-
 $$
-x_t - 2x_{t+1} + x_{t+2} \sim N(0, \sigma^2)\\
-x_{t+2} \sim N(2x_{t+1} - x_t, \sigma^2) \\
-x_{t+2} = 2x_{t+1} - x_t + \epsilon_t \\
+x_t - 2x_{t+1} + x_{t+2} \sim N(0, \sigma^2)
+$$
+$$
+x_{t+2} \sim N(2x_{t+1} - x_t, \sigma^2)
+$$
+$$
+x_{t+2} = 2x_{t+1} - x_t + \epsilon_t, \quad
 \epsilon_t \sim N(0, \sigma^2)
 $$
 
@@ -127,7 +127,7 @@ RW_figure <- ggarrange(RW1_plot, RW2_plot, ncol = 1)
 RW_figure
 ```
 
-# Simulation study
+# Simulation study - Gaussian data with or without an offset
 We want to conduct a small simulation study to see if the adaptive models improve the standard models in situations with shocks.First we will start with assessing the performance on non.shocked data.
 
 ## Simulation of non-shocked Gaussian data
@@ -172,37 +172,8 @@ plot_realizations(NSG_dataframe[, 1:5], "Simulated non-shocked Gaussian data
                   with N=50 and 5 realisations", legend = FALSE)
 ```
 
-## Model evaluation of the the direct model for non-shocked Gaussian data
-For our actual simulation study we are interested in $N=50$ timepoints and 100 realizations. We will then fit a direct smooth model and an adaptive model to each realization and compare some model criteria, like DIC etc. 
 
-### Root mean square eroor
-A common model criteria is the root mean square error, or RMSE. We define a function to calculate this below. The lower RMSE the better.
-
-```{r}
-RMSE <- function(data, preds){
-  return(sqrt( sum((data - preds)**2) / length(data))) #definition of RMSE
-}
-```
-
-### Average proper logarithmic scoring rule(LS)
-From a paper by Gneiting and Raftery (2007). 
-$$
-\text{LS}(p, \omega) = \text{log}p(\omega)
-$$
-where $p$ is the predicted distribution of a point, which we get from INLA, and $\omega$ is the observed value, which is the specific datapoint. We then take the average of the score for all the data points. The higher average proper LS the better.
-
-```{r}
-average_proper_LS <- function(res, data){
-  #res is an inla object from calling a model on data, a vector of datapoints
-  mean <- res$summary.fitted.values$mean
-  sd <- res$summary.fitted.values$sd
-  p <- dnorm(data, mean = mean, sd = sd)
-  return(mean(log(p)))
-}
-```
-
-
-### The direct smooth model with INLA
+###  Brief testing with INLA on some simulated data
 We will fit the simple model in INLA with a latent layer as
 $$
 \eta_t = \mu + x_t
@@ -254,21 +225,25 @@ Lets make some general functions for simulating shocked Gaussian data.
 
 ```{r}
 #function to simulate a shocked realization y
-sim_shocked_gaussian_data <- function(N, mu, sigma_obs, sigma_rw, t_start = 20, t_end = 30, mu_offset = 0.7, sigma_offset = 0.3){
+sim_shocked_gaussian_data <- function(N, mu, sigma_obs, sigma_rw, t_start = 20,
+                              t_end = 30, mu_offset = 0.7, sigma_offset = 0.3){
   #N timepoints, mean mu, and standard deviations for observations and the RW1
   #t_start and t_end bound the offset area with specified mean and sd
   eta <- mu + Norm_RW1(sigma_rw, N)
   y <- sapply(eta, function(r) rnorm(1, mean = r, sd = sigma_obs))
-  offset <- c(rep(0, t_start - 1),rnorm(t_end - t_start + 1, mu_offset, sigma_offset), rep(0, N - t_end))
+  offset <- c(rep(0, t_start - 1),rnorm(t_end - t_start + 1, mu_offset,
+                                        sigma_offset), rep(0, N - t_end))
   y_offset <- y + offset
   return(y_offset)
 }
 
-sim_shocked_gaussian_dataframe <- function(N, mu, sigma_obs, sigma_rw, t_start = 20, t_end = 30, mu_offset = 0.7, sigma_offset = 0.3, n, seed = 50){
+sim_shocked_gaussian_dataframe <- function(N, mu, sigma_obs, sigma_rw, 
+  t_start = 20, t_end = 30, mu_offset = 0.7, sigma_offset = 0.3, n, seed = 50){
   set.seed(seed)
   df <- data.frame(matrix(NA, nrow = N, ncol = n))
   for(i in 1:n){
-    df[, i] <- sim_shocked_gaussian_data(N, mu, sigma_obs, sigma_rw, t_start, t_end, mu_offset, sigma_offset) 
+    df[, i] <- sim_shocked_gaussian_data(N, mu, sigma_obs, sigma_rw, t_start,
+                                         t_end, mu_offset, sigma_offset) 
   }
   return(df)
 }
@@ -278,10 +253,11 @@ SG_dataframe <- sim_shocked_gaussian_dataframe(N, mu, sigma_obs, sigma_rw, n=n)
 SG_dataframe$t <- 1:N #needed for random effects later
 
 #Visualizing some simulated data
-plot_realizations(SG_dataframe[, 1:5], "Simulated shocked Gaussian data with N=50 and 5 realisations", legend = FALSE)
+plot_realizations(SG_dataframe[, 1:5], "Simulated shocked Gaussian data 
+                  with N=50 and 5 realisations", legend = FALSE)
 ```
 
-## Implementing the adaptive random walk in the latent model in INLA
+## Implementing the adaptive random walk in INLA
 As this is somewhat complicated and new to me, I will start by a slightly easier example, namely the RW1. Can then also compare it to the already defined RW1 in INLA to ensure it works as intended. First some basic theory on defining random effects in INLA from https://becarioprecario.bitbucket.io/inla-gitbook/ch-newmodels.html .
 
 ### Defining new latent random effects in INLA
@@ -395,7 +371,8 @@ RW1_model <- inla.rgeneric.define(inla.rgeneric.RW1.model, N = N, R_star = R_sta
 The RW1_model above is now a custom latent effect which can be included in INLA formulas to define models. However, it is only defined for $N=50$, and we need to define separate ones for other $N$.Now, lets check if it works as intended on some data from earlier. Then we need to define the INLA formula where we add a constraint to enforce a sum to zero constraint as the model includes an intercept.
 ```{r}
 #The INLA formula for a latent model with intercept and user defined RW1
-formula_M <- y ~ f(time, model = RW1_model, extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
+formula_M <- y ~ f(time, model = RW1_model, 
+                   extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
 res_M <- inla(formula_M, family = "gaussian", data = NSG_data)
 
 #The standard RW1 model from INLA
@@ -406,14 +383,16 @@ summary(res_M)
 summary(res_I)
 
 #plots to compare the model output
-plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean, main = "Comparison of the mean", xlab = "Manual RW1", ylab = "INlA's RW1")
+plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean, 
+     main = "Comparison of the mean", xlab = "Manual RW1", ylab = "INlA's RW1")
 abline(0, 1)
-plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd, main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
+plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd, 
+     main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
 abline(0, 1)
 ```
-From the summaries it is clear they are very similar. However, not exactly equal, as for instance the mean of the Gaussian precision. This is supported by the plots of the means and standard deviations, which show that they are almost the same, but clearly not identical.
+From the summaries it is clear they are very similar. However, not exactly equal, as for instance the mean of the Gaussian precision. This is supported by the plots of the means and standard deviations, which show that they are almost the same, but clearly not identical. We also note that the run-time for the manual model is much longer than the one implemented by INLA, so I will use INLA's predefined model from here on out for better computational times.
 
-## Implementing the adaptive RW1 in INLA
+### Implementing the adaptive RW1
 We now make the previous model more flexible by allowing for two different precisions in the random walk. The new precision is used for transitions involving conflict years which we define.So, we start by computing the scaled structure matrices R1_star and R2_star which we need as inputs for the adaptive random walk.
 
 ```{r}
@@ -513,7 +492,8 @@ for( i in 1:5) {
   colnames(test_data) <- c("y", "time") #makes the colnames match the formula
   
   res_I <- inla(formula_I, family = "gaussian", data = test_data)
-  plot_df_I <- data.frame(matrix(c(SG_dataframe[, i], res_I$summary.fitted.values$mean), ncol = 2))
+  plot_df_I <- data.frame(matrix(c(SG_dataframe[, i],
+                                   res_I$summary.fitted.values$mean), ncol = 2))
   colnames(plot_df_I) <- c("sim_data", "preds")
   
   plot_I <- plot_realizations(plot_df_I, "Predictions with INLA's RW1")
@@ -521,7 +501,8 @@ for( i in 1:5) {
   #The adaptive RW1
   res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = test_data)
   
-  plot_df_ARW1 <- data.frame(matrix(c(SG_dataframe[, i], res_ARW1$summary.fitted.values$mean), ncol = 2))
+  plot_df_ARW1 <- data.frame(matrix(c(SG_dataframe[, i],
+                              res_ARW1$summary.fitted.values$mean), ncol = 2))
   colnames(plot_df_ARW1) <- c("sim_data", "preds")
   
   plot_ARW1 <- plot_realizations(plot_df_ARW1, "Predictions with adaptive RW1")
@@ -530,7 +511,44 @@ for( i in 1:5) {
 }
 figure_list
 ```
-We observe that the standard RW1 struggles a lot with the first and third realization, and the rest of the plots seem nice.Now, lets do some rigorous testing for the entire dataframes form earlier and evaluate them by the chosen model criterias, RMSE and LS. First lets compare the models for non-shocked Gaussian data.
+We observe that the standard RW1 struggles a lot with the first and third realization, and the rest of the plots seem nice.
+
+## Model evaluation
+
+### Model criteria
+We will evaluate the models with root mean square error (RMSE) and average proper logarithmic scoring (LS).
+
+#### Root mean square eroor
+
+A common model criteria is the RMSE. We define a function to calculate this below. The lower RMSE the better.
+
+```{r}
+RMSE <- function(data, preds){
+  return(sqrt( sum((data - preds)**2) / length(data))) #definition of RMSE
+}
+```
+
+#### Average proper logarithmic scoring rule
+
+From a paper by Gneiting and Raftery (2007). 
+$$
+\text{LS}(p, \omega) = \text{log}p(\omega)
+$$
+where $p$ is the predicted distribution of a point, which we get from INLA, and $\omega$ is the observed value, which is the specific datapoint. We then take the average of the score for all the data points. The higher average proper LS the better.
+
+```{r}
+average_proper_LS <- function(res, data){
+  #res is an inla object from calling a model on data, a vector of datapoints
+  mean <- res$summary.fitted.values$mean
+  sd <- res$summary.fitted.values$sd
+  p <- dnorm(data, mean = mean, sd = sd)
+  return(mean(log(p)))
+}
+```
+
+### Model evaluation for non-shocked data 
+Lets do some rigorous testing for the entire dataframes form earlier and evaluate them by the chosen model criterias, RMSE and LS. First lets compare the models for non-shocked Gaussian data.
+
 ```{r}
 Model_eval_NSG <- data.frame(matrix(NA, nrow = n, ncol = 4))
 colnames(Model_eval_NSG) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
@@ -551,29 +569,31 @@ for(i in 1:n){#iterate over each simulated realization
   Model_eval_NSG[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
 }
 
-#boxplots of the differences
-#boxplot(Model_eval_NSG["RMSE_RW1"] - Model_eval_NSG["RMSE_ARW1"],ylab = "RMSE")
-#boxplot(Model_eval_NSG["LS_ARW1"] - Model_eval_NSG["LS_RW1"], ylab = "LS")
-
-myboxplot <- function(data, xlabel = "", ylabel = "") {
+myboxplot <- function(data, Y, xlabel, ylabel, ymin = 0, ymax = 5) {
   df <- data.frame(d = data[,1])
   BPlot <- ggplot(df, aes(y = d)) +
-       geom_boxplot(fill = "slateblue", alpha = 0.2) +
+    geom_boxplot(fill = "slateblue", alpha = 0.2) +
     labs( x = xlabel, y = ylabel)
+  if(Y){
+    BPlot <- BPlot + ylim(ymin, ymax)}
   return(BPlot)
 }
 
 #Plotting
-plot_RMSE_RW1_NS <- myboxplot(Model_eval_NSG["RMSE_RW1"], "", "RMSE")
-plot_LS_RW1_NS <- myboxplot(Model_eval_NSG["LS_RW1"], "RW1", "LS")
-plot_RMSE_ARW1_NS <- myboxplot(Model_eval_NSG["RMSE_ARW1"], "", "")
-plot_LS_ARW1_NS <- myboxplot(Model_eval_NSG["LS_ARW1"], "ARW1", "")
+plot_RMSE_RW1_NS <- myboxplot(Model_eval_NSG["RMSE_RW1"], 0, "", "RMSE")
+plot_LS_RW1_NS <- myboxplot(Model_eval_NSG["LS_RW1"], 1, "RW1", "LS", 2, 4.2)
+plot_RMSE_ARW1_NS <- myboxplot(Model_eval_NSG["RMSE_ARW1"], 0, "", "")
+plot_LS_ARW1_NS <- myboxplot(Model_eval_NSG["LS_ARW1"], 1, "ARW1", "", 2, 4.2)
 
-plot_eval_NS <- ggarrange(plot_RMSE_RW1_NS, plot_RMSE_ARW1_NS,plot_LS_RW1_NS, plot_LS_ARW1_NS, ncol = 2, nrow = 2)
-annotate_figure(plot_eval_NS, top = text_grob("Model evaluation for non-shocked Gaussian data")) #can add more parameters like size and color...
+plot_eval_NS <- ggarrange(plot_RMSE_RW1_NS, plot_RMSE_ARW1_NS,
+                          plot_LS_RW1_NS, plot_LS_ARW1_NS, ncol = 2, nrow = 2)
+annotate_figure(plot_eval_NS, top = text_grob
+                ("Model evaluation for non-shocked Gaussian data")) 
+#can add more parameters like size and color...
 ```
+From the box-plots it seems like the RW1 generally obtains a smaller RMSE while the ARW1 gets a slightly larger LS. In other words, the RW1 is best according to RMSE and ARW1 is best according to LS. However, they are rather close in both cases.
 
-Lets now test for shocked data.
+### Model evaluation for shocked data 
 ```{r}
 Model_eval_SG <- data.frame(matrix(NA, nrow = n, ncol = 4))
 colnames(Model_eval_SG) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
@@ -592,9 +612,6 @@ for(i in 1:n){#iterate over each simulated realization
   
   Model_eval_SG[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
 }
-#boxplots of the differences
-#boxplot(Model_eval_SG["RMSE_RW1"] - Model_eval_SG["RMSE_ARW1"], ylab = "RMSE")
-#boxplot(Model_eval_SG["LS_ARW1"] - Model_eval_SG["LS_RW1"], ylab = "LS")
 
 #check behavior for an outlier realization
 test_data <- SG_dataframe[, c(72, n + 1)] #gets the i-th realization and time
@@ -609,44 +626,235 @@ res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data)
 plot_realizations(data.frame(res_RW1$summary.fitted.values$mean, SG_dataframe[, 72]), "")
 
 #Plotting
-plot_RMSE_RW1_S <- myboxplot(Model_eval_SG["RMSE_RW1"], "", "RMSE")
-plot_LS_RW1_S <- myboxplot(Model_eval_SG["LS_RW1"], "RW1", "LS")
-plot_RMSE_ARW1_S <- myboxplot(Model_eval_SG["RMSE_ARW1"], "", "")
-plot_LS_ARW1_S <- myboxplot(Model_eval_SG["LS_ARW1"], "ARW1", "")
+plot_RMSE_RW1_S <- myboxplot(Model_eval_SG["RMSE_RW1"], 0, "", "RMSE")
+plot_LS_RW1_S <- myboxplot(Model_eval_SG["LS_RW1"], 1, "RW1", "LS", -2, 4)
+plot_RMSE_ARW1_S <- myboxplot(Model_eval_SG["RMSE_ARW1"], 0, "", "")
+plot_LS_ARW1_S <- myboxplot(Model_eval_SG["LS_ARW1"], 1, "ARW1", "", -2, 4)
 
-plot_eval_NS <- ggarrange(plot_RMSE_RW1_S, plot_RMSE_ARW1_S,plot_LS_RW1_S, plot_LS_ARW1_S, ncol = 2, nrow = 2)
-annotate_figure(plot_eval_NS, top = text_grob("Model evaluation for shocked Gaussian data")) #can add more parameters like size and color...
+plot_eval_S <- ggarrange(plot_RMSE_RW1_S, plot_RMSE_ARW1_S,
+                          plot_LS_RW1_S, plot_LS_ARW1_S, ncol = 2, nrow = 2)
+annotate_figure(plot_eval_S, top = text_grob
+                ("Model evaluation for shocked Gaussian data")) 
+#can add more parameters like size and color...
+```
+
+For the shocked data we see that ARW1 clearly outperforms the RW1 according to both RMSE and LS. Nevermind, not sure about LS, the plots do not have the same axis.
+
+
+# Recreating the simulations study by Wakefield and Aleshin-Guendel
+Their simulation study compares a standard RW1 with an adaptive RW1 with an extra precision parameter for some timepoints where we expect a shock. They look at three different means in the latent layer, namely flat, delta and triangle. The latent layer is $\eta_i = \mu_i + b_i$ where $b_i \sim N(0, \tau_i^{-1})$ for some precision $\tau_i$. The observation layer is then $y_i | \eta_i \sim N(\eta_i, V)$ for some variance $V$.They choose $V$ to be $1/75$, $1/150$ or $1/300$. $\tau_i$ is either $20$ for all points or $10$ for the conflict points, which are $9-15$ out of the $N=30$ timepoints. They then combine and evaluate the model in all these cases.Lets start my creating and plotting the means in the latent layers.
+
+```{r}
+#parameters
+N <- 30 #number of timepoints
+n <- 5 #number of simulations in each case
+conf_years <- c(9, 10, 11, 12, 13, 14, 15) #the conflict years
+
+#defining the means
+mean_flat <- rep(2, N)
+mean_delta <- mean_flat + c(rep(0, 8), rep(1, 7), rep(0, 15))
+mean_triangle <- mean_flat + c(rep(0, 8), c(0.3, 0.6, 0.9, 1.2, 
+                                            0.9, 0.6, 0.3), rep(0, 15))
+
+#visualizing the means
+plot(1:N, mean_flat)
+plot(1:N, mean_delta)
+plot(1:N, mean_triangle)
+```
+MAKE NICER PLOTS _ GGPLOT
+
+The next step is to make functions for simulating the data, which is done below.
+```{r}
+#functions to simulate data as in Wakefield and Aleshin-Guendel
+sim_data_Wakefield <- function(mu, V, tau1 = 20, tau2 = 20) {
+  eta <- mu + c(rnorm(8, sd = 1/tau1), rnorm(7, sd = 1/tau2), 
+                rnorm(15, sd = 1/tau1))
+  y <- rnorm(length(mu), mean = eta, sd = sqrt(V))
+  return(y)
+}
+
+sim_dataframe_Wakefield <- function(n, mu, V, tau1 = 20, tau2 = 20, seed = 64) {
+  set.seed(seed)
+  df <- data.frame(matrix(0, nrow = length(mu), ncol = n))
+  for (i in 1:n) {
+    df[, i] <- sim_data_Wakefield(mu, V, tau2 = tau2)
+  }
+  df$t <- 1:length(mu)
+  return(df)
+}
+```
+
+Now we simulate the data for the eighteen different cases with $n = 20$ realizations of each case.
+```{r}
+#for constant tau
+
+# flat mean with varying V
+data_w_flat_75_NS <- sim_dataframe_Wakefield(n, mean_flat, 1/75)
+data_w_flat_150_NS <- sim_dataframe_Wakefield(n, mean_flat, 1/150)
+data_w_flat_300_NS <- sim_dataframe_Wakefield(n, mean_flat, 1/300)
+
+#delta mean with varying V
+data_w_delta_75_NS <- sim_dataframe_Wakefield(n, mean_delta, 1/75)
+data_w_delta_150_NS <- sim_dataframe_Wakefield(n, mean_delta, 1/150)
+data_w_delta_300_NS <- sim_dataframe_Wakefield(n, mean_delta, 1/300)
+
+#triangle mean with varying V
+data_w_triangle_75_NS <- sim_dataframe_Wakefield(n, mean_triangle, 1/75)
+data_w_triangle_150_NS <- sim_dataframe_Wakefield(n, mean_triangle, 1/150)
+data_w_triangle_300_NS <- sim_dataframe_Wakefield(n, mean_triangle, 1/300)
+
+#for varying tau
+ 
+# flat mean with varying V
+data_w_flat_75_S <- sim_dataframe_Wakefield(n, mean_flat, 1/75, tau2 = 10)
+data_w_flat_150_S <- sim_dataframe_Wakefield(n, mean_flat, 1/150, tau2 = 10)
+data_w_flat_300_S <- sim_dataframe_Wakefield(n, mean_flat, 1/300, tau2 = 10)
+
+#delta mean with varying V
+data_w_delta_75_S <- sim_dataframe_Wakefield(n, mean_delta, 1/75, tau2 = 10)
+data_w_delta_150_S <- sim_dataframe_Wakefield(n, mean_delta, 1/150, tau2 = 10)
+data_w_delta_300_S <- sim_dataframe_Wakefield(n, mean_delta, 1/300, tau2 = 10)
+
+#triangle mean with varying V
+data_w_triangle_75_S <- sim_dataframe_Wakefield(n, mean_triangle, 1/75, tau2 = 10)
+data_w_triangle_150_S <- sim_dataframe_Wakefield(n, mean_triangle, 1/150, tau2 = 10)
+data_w_triangle_300_S <- sim_dataframe_Wakefield(n, mean_triangle, 1/300, tau2 = 10)
+```
+
+As we now use $N=30$ timepoints, we also have to define the ARW1 model with the corresponding scaled structure matrix.
+```{r}
+#Parameters also defined further up
+N <- 30
+conf_years <- c(9, 10, 11, 12, 13, 14, 15)
+R_star_list_W <- Scaled_structure_matrices_for_ARW1(N, conf_years)
+ARW1_model_W <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
+                                  N = N, R_star_list = R_star_list_W)
+formula_ARW1_W <- y ~ f(time, model = ARW1_model_W,
+                  extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))
+```
+
+
+Model evaluation
+```{r}
+myboxplot2 <- function(data, mean, V) {
+  df <- data.frame(d = data[,1])
+  BPlot <- ggplot(df, aes(y = d)) +
+      geom_boxplot(fill = "slateblue", alpha = 0.2) +
+      ggtitle(paste("Mu: ", mean, " and V: ", V))+
+      ylab("") + xlab("")
+  return(BPlot)
+}
+
+#testing the boxplot2
+myboxplot2(data_w_delta_150_NS["X1"], "delta", "1/150")
+
+mod_eval_W <- function(df, mean = "", V = "") {
+  n <- dim(df)[2] - 1
+  
+  eval_df <- data.frame(matrix(NA, nrow = n, ncol = 4))
+  colnames(eval_df) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
+
+  for(i in 1:n){#iterate over each simulated realization
+    test_data <- df[, c(i, n + 1)] #gets the i-th realization + time
+    colnames(test_data) <- c("y", "time") #makes the colnames match the formula
+    
+    res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data)
+    LS_RW1 <- average_proper_LS(res_RW1, df[, i])
+    RMSE_RW1 <- RMSE(df[, i], res_RW1$summary.fitted.values$mean )
+    
+    res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data)
+    LS_ARW1 <- average_proper_LS(res_ARW1, df[, i])
+    RMSE_ARW1 <- RMSE(df[, i], res_ARW1$summary.fitted.values$mean )
+    
+    eval_df[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
+  }
+  
+  plot_RMSE <- myboxplot2(eval_df["RMSE_RW1"] - eval_df["RMSE_ARW1"], mean, V)
+  plot_LS <- myboxplot2(eval_df["LS_ARW1"] - eval_df["LS_RW1"], mean, V)
+  
+  return(list(RMSE = plot_RMSE, LS = plot_LS))
+}
+```
+
+```{r}
+#Non-shocked data, ie. constant tau
+f_75_NS <- mod_eval_W(data_w_flat_75_NS, "flat", "1/75")
+f_150_NS <- mod_eval_W(data_w_flat_150_NS, "flat", "1/150")
+f_300_NS <- mod_eval_W(data_w_flat_300_NS, "flat", "1/300")
+
+d_75_NS <- mod_eval_W(data_w_delta_75_NS, "delta", "1/75")
+d_150_NS <- mod_eval_W(data_w_delta_150_NS, "delta", "1/150")
+d_300_NS <- mod_eval_W(data_w_delta_300_NS, "delta", "1/300")
+
+t_75_NS <- mod_eval_W(data_w_triangle_75_NS, "triangle", "1/75")
+t_150_NS <- mod_eval_W(data_w_triangle_150_NS, "triangle", "1/150")
+t_300_NS <- mod_eval_W(data_w_triangle_300_NS, "triangle", "1/300")
+
+#making the 3x3 boxplots
+plot_eval_NS_W_RMSE <- ggarrange(f_75_NS$RMSE, f_150_NS$RMSE, f_300_NS$RMSE,
+                                 d_75_NS$RMSE, d_150_NS$RMSE, d_300_NS$RMSE,
+                                 t_75_NS$RMSE, t_150_NS$RMSE, t_300_NS$RMSE,
+                                 ncol = 3, nrow = 3)
+annotate_figure(plot_eval_NS_W_RMSE, 
+                top = text_grob("RMSE for non-shocked Wakefield data")) 
+
+plot_eval_NS_W_LS <- ggarrange(f_75_NS$LS, f_150_NS$LS, f_300_NS$LS,
+                               d_75_NS$LS, d_150_NS$LS, d_300_NS$LS,
+                               t_75_NS$LS, t_150_NS$LS, t_300_NS$LS, 
+                               ncol = 3, nrow = 3)
+annotate_figure(plot_eval_NS_W_LS, 
+                top = text_grob("LS for non-shocked Wakefield data")) 
+
+#Shocked data, ie. not constant tau
+f_75_S <- mod_eval_W(data_w_flat_75_S, "flat", "1/75")
+f_150_S <- mod_eval_W(data_w_flat_150_S, "flat", "1/150")
+f_300_S <- mod_eval_W(data_w_flat_300_S, "flat", "1/300")
+
+d_75_S <- mod_eval_W(data_w_delta_75_S, "delta", "1/75")
+d_150_S <- mod_eval_W(data_w_delta_150_S, "delta", "1/150")
+d_300_S <- mod_eval_W(data_w_delta_300_S, "delta", "1/300")
+
+t_75_S <- mod_eval_W(data_w_triangle_75_S, "triangle", "1/75")
+t_150_S <- mod_eval_W(data_w_triangle_150_S, "triangle", "1/150")
+t_300_S <- mod_eval_W(data_w_triangle_300_S, "triangle", "1/300")
+
+#Making the 3x3 boxplots
+plot_eval_S_W_RMSE <- ggarrange(f_75_S$RMSE, f_150_S$RMSE, f_300_S$RMSE,
+                                d_75_S$RMSE, d_150_S$RMSE, d_300_S$RMSE,
+                                t_75_S$RMSE, t_150_S$RMSE, t_300_S$RMSE, 
+                                ncol = 3, nrow = 3)
+annotate_figure(plot_eval_S_W_RMSE, 
+                top = text_grob("RMSE for shocked Wakefield data")) 
+
+plot_eval_S_W_LS <- ggarrange(f_75_S$LS, f_150_S$LS, f_300_S$LS, d_75_S$LS,
+                              d_150_S$LS, d_300_S$LS, t_75_S$LS, t_150_S$LS,
+                              t_300_S$LS, ncol = 3, nrow = 3)
+annotate_figure(plot_eval_S_W_LS, 
+                top = text_grob("LS for shocked Wakefield data"))
 ```
 
 
 
+
 check:
-maybe weird axis on line 633
+maybe weird axis on line 604, definitely weird legend labels, also at 609
+Check yaxis for boxplots for the model eval of Gaussian data
 
-
-
-Sprøsmål:
-Should I scale the R-matrix when defining the precision matrix Q in the RW1? By geometric variance and so on 
-When I return numeric(0) for the mean, will that guarantee that it sums to zero?
-What should I use as my prior for precision parameters?
-Burde jeg sette seed før INLA kall for reproducibility?
-
-inla.doc("rw1")
-inla.scale.model
-
-
+inla.doc("rw1") - all info om RW1, for eksempel prior og initial values
+inla.scale.model - optional argument to scale or not scale a latent effect
+NB: INLA klikker hvis man bruker funksjoner inne i den, for eksmepel geometric_variance, ellers må de defineres det inne potensielt?
 
 To do:
 Write about INLA - not started
 Use set.seed() to make results reproducible - continuous need for this
   dont need to set the seed for INLA, should be deterministic. 
 
-Implementere logarithmic scoring. - done
-Sammenligne min RW1 med INLAs RW1 - min funker ikke, skrev om ARW1, den funker, men skjønner ingenting av hvorfor den ene ikke funker
-
 Briefly describe the methods used in the overleaf, both for data and models.
-Fikse RW1
 
+Sim-studie:
+Har undersøkt en RW1 med Gaussian offset for noen datapunkter.
+Reprodusere Wakefield: 3 ulike trends og tre ulike varianser, pluss forskjell i conf og non-conf tau eller ikke, så 18 scenarior og sjekke LS og RMSE.
+Andrea foreslo også harmonisk med noise pluss offset.
 
 
 
