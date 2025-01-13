@@ -1,5 +1,5 @@
 ---
-title: "IMplementing code from Wakefield for comparison"
+title: "Implementing code from Wakefield for comparison"
 author: "Halvard"
 date: "`r Sys.Date()`"
 output: pdf_document

@@ -263,7 +263,7 @@ plot_realizations(SG_dataframe[, 1:5], "Simulated shocked Gaussian data
 As this is somewhat complicated and new to me, I will start by a slightly easier example, namely the RW1. Can then also compare it to the already defined RW1 in INLA to ensure it works as intended. First some basic theory on defining random effects in INLA from https://becarioprecario.bitbucket.io/inla-gitbook/ch-newmodels.html .
 
 ### Defining new latent random effects in INLA
-New latent effects must be specified as GMRFs. So we need $\mu$, $Q$ and $\theta$ and its log-priors and initial values. Also need a graph, which I think can just be $Q$ as well, and some log-normalizing constant. As $\theta$ is parametrized as $\theta_1 = \log(\tau)$ and $\theta_2 = \text{logit}(\rho)$ where $\tau$ is the precision and $\rho$ is the spatial dependence, which I think we define to be $1$. The general structure of the inla.rgeneric is shown below:
+New latent effects must be specified as GMRFs. The general structure of the inla.rgeneric is shown below:
 ```{r, eval=FALSE}
 inla.rgeneric.somemodel = function(
   cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
@@ -813,7 +813,7 @@ For the shocked data we see that ARW1 clearly outperforms the RW1 according to b
 
 
 # Recreating the simulations study by Wakefield and Aleshin-Guendel
-Their simulation study compares a standard RW1 with an adaptive RW1 with an extra precision parameter for some timepoints where we expect a shock. They look at three different means in the latent layer, namely flat, delta and triangle. The latent layer is $\eta_i = \mu_i + b_i$ where $b_i \sim N(0, \tau_i^{-1})$ for some precision $\tau_i$. The observation layer is then $y_i | \eta_i \sim N(\eta_i, V)$ for some variance $V$.They choose $V$ to be $1/75$, $1/150$ or $1/300$. $\tau_i$ is either $20$ for all points or $10$ for the conflict points, which are $9-15$ out of the $N=30$ timepoints. They then combine and evaluate the model in all these cases.Lets start my creating and plotting the means in the latent layers.
+Their simulation study compares a standard RW1 with an adaptive RW1 with an extra precision parameter for some timepoints where we expect a shock. They look at three different means in the latent layer, namely flat, delta and triangle. The latent layer is $\eta_i = \mu_i + b_i$ where $b_i \sim N(0, \tau_i^{-1})$ for some precision $\tau_i$. The observation layer is then $y_i | \eta_i \sim N(\eta_i, V)$ for some variance $V$.They choose $V$ to be $1/75$, $1/150$ or $1/300$. $\tau_i$ is either $20$ for all points or $10$ for the conflict points, which are $9-15$ out of the $N=30$ timepoints. They then combine and evaluate the model in all these cases. Lets start my creating and plotting the means in the latent layers.
 
 ```{r}
 #parameters
@@ -1214,11 +1214,6 @@ Reprodusere Wakefield: 3 ulike trends og tre ulike varianser, pluss forskjell i 
 Andrea foreslo også harmonisk med noise pluss offset.
 
 
-Må gjøres:
-implementer med unstructured random effect, altså bare en iid gaussian, både i RW1 og i ARW1, kan kanskje bare legge til en f(iid) i hver formel
-simulere data og figurer med harmonisk funksjon, med og uten offset.
-Present the box plots with 2 in every box, not the difference.Også ha samme y-akse på hver linje når det er tre ved siden av hverandre.
-
 #Test data
 ```{r}
 df <- data_w_flat_300_NCT[[1]]
@@ -1503,8 +1498,80 @@ inla.rgeneric.RW1.model2 = function(
 N <- 30 #is defined further up as well
 RW1_model2 <- inla.rgeneric.define(inla.rgeneric.RW1.model2, N = N)
 
+formula_RW1_I <- y ~ f(time, model = "rw1")  #+ f(us, model = "iid")
+formula_RW1_M <- y ~ f(time, model = RW1_model2, extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))  #+ f(us, model = "iid")
+
+res_RW1_I <- inla(formula_RW1_I, family = "gaussian", data = NSG_data[1:30, ]) #test_data)
+                     
+#control.compute = list(cpo = TRUE),control.family = list(hyper = list(prec = list(initial = log(P), fixed = TRUE))))
+res_RW1_M <- inla(formula_RW1_M, family = "gaussian", data = NSG_data[1:30, ]) #test_data)
+
+#plots to compare the model output
+plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean, 
+     main = "Comparison of the mean", xlab = "Manual RW1", ylab = "INlA's RW1")
+abline(0, 1)
+plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd, 
+     main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
+abline(0, 1)
+```
+
+#RW1 med definert log.const
+
+```{r}
+inla.rgeneric.RW1.model3 = function(
+  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
+  theta = NULL)
+{
+  #Input:
+  #N is the number of timepoints
+  
+  envir = parent.env(environment())
+  
+  interpret_theta <- function() {return(list(tau = exp(theta[1L])))}
+  
+  graph <- function() {return(Q())}
+  
+  Q <- function() {
+    R <- toeplitz(c(2, -1, rep(0, N - 2)))# 2 on diag and -1 on firstdiags
+    R[1, 1] <- R[N, N] <- 1 # 1 for first and last diag element
+    gv <- exp(1 / N * sum(log(diag(INLA:::inla.ginv(R))))) #the geometric variance
+    R_star <- gv * R 
+    
+    p <- interpret_theta()
+    Q <- p$tau * R_star
+    return(inla.as.sparse(Q))
+  }
+  
+  mu <- function() {return(numeric(0))}
+  
+  initial <- function() {return(4)}#default for precisions: initial = 4
+  
+  log.norm.const = function() {
+    p = interpret.theta()
+    val = (N-1) * (- 0.5 * log(2*pi) + 0.5*log(p$tau))
+    return (val)
+  }
+  
+  log.prior <- function() {#default: shape = 1, rate = 0.00005 for tau
+    p <- interpret_theta()
+    prior <- dgamma(p$tau, shape = 1, rate = 0.00005, log = TRUE) + log(p$tau)
+    return(prior)
+  }
+  
+  quit <- function() {return(invisible())}
+  
+  #to ensure theta is defined
+  if (!length(theta)) theta = initial()
+  
+  vals <- do.call(match.arg(cmd), args = list())
+  return(vals)
+}
+
+N <- 30 #is defined further up as well
+RW1_model3 <- inla.rgeneric.define(inla.rgeneric.RW1.model3, N = N)
+
 formula_RW1_I <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
-formula_RW1_M <- y ~ f(time, model = RW1_model2, extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
+formula_RW1_M <- y ~ f(time, model = RW1_model3, extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
 
 res_RW1_I <- inla(formula_RW1_I, family = "gaussian", data = test_data)
                      
@@ -1519,10 +1586,8 @@ plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd,
      main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
 abline(0, 1)
 
-test_data
-
-
 ```
+
 
 
 #The actual data - Yearly death rates from Norway
@@ -1537,7 +1602,17 @@ DeathsNorway <- read.table("C:/Users/Halvard/Documents/GitHub/Master-project/HMD
 
 PopulationNorway <- read.table("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-data/PopulationNorway.txt", sep = "", header = TRUE, fill = TRUE)
 
+colnames(DeathsNorway)[5] <- "deaths"
+NorwayData <- cbind(DeathsNorway, PopulationNorway[1:4272, "Total"]) #remove the population data for 2024 as there is no deaths data yet
 
+colnames(NorwayData)[6] <- "population"
+
+NorwayData$death_rate <- NorwayData$deaths/NorwayData$population
+
+library(dplyr)
+DR20_24 <- filter(NorwayData, Age == "20-24")
+
+plot(DR20_24$Year, DR20_24$death_rate)
 ```
 
 
