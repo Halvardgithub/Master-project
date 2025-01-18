@@ -1,0 +1,306 @@
+---
+title: "Deaths Norway"
+author: "Halvard"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This Rmarkdown contains the analysis of the real data for deaths in Norway and the goal is to fit and compare models with and without adaptive Gaussian Markov random fields in the latent layer of a Bayesian hierarchical model fit through INLA. First, lets introduce the data and perform the necessaru preporssecing. 
+
+
+# The data - Yearly death rates from Norway
+We are specifically interested in periods where we expect shocks. For instance the spanish flu in 1918-1919 ( ref article Tom Borza) and WW2 from 1940-1945 (source?), possibly also from covid. The data is from (source:HMD, and link in sourcelist overleaf), and it is changed and revised periodically, so might be changes. Copied the data from the txt file, and only removed the first line with info about the dataset.
+
+https://www.mortality.org/Country/Country?cntr=NOR
+
+Used the dataset for deaths and 5x1 for ageinterval and yearinterval.
+For population I used 5-year, which is yearly and splits age by 5 year intervals. Both are in the column 5x1 and in the section of complete datasets. We then scale the deaths for a age group with the total population in that age group and are left with death rates for each age group. The Spanish flu mainly killed young people, and the same could be said for WW2, as mainly young men went to war and participated in the resistance effort (source maybe?). This is also supported by the data, where we clearly observe the effect of the Spainsh flu and WW2 for the age group $20-24$ while these shocks are less clear for older age groups, say $50-54$. Therefore, I will investigate the death rates for the age $20-24$ from $1900$ to $1970$ with the shocked years $S = \{1918, 1919, 1940, 1941, 1942, 1943, 1944, 1945\}$. 
+
+Maybe a figure of the plots for different ages to illustrate and show that the shocks are visually easy to spot. 
+
+```{r}
+DeathsNorway <- read.table("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-data/DeathsNorway.txt", sep = "", header = TRUE, fill = TRUE)
+
+PopulationNorway <- read.table("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-data/PopulationNorway.txt", sep = "", header = TRUE, fill = TRUE)
+
+colnames(DeathsNorway)[5] <- "deaths"
+NorwayData <- cbind(DeathsNorway, PopulationNorway[1:4272, "Total"]) #remove the population data for 2024 as there is no deaths data yet
+
+colnames(NorwayData)[6] <- "population"
+
+NorwayData$death_rate <- NorwayData$deaths/NorwayData$population
+
+library(dplyr) #for filter and more
+library(ggplot2)
+library(ggpubr)
+library(INLA)
+
+N <- 71
+S_flu <- c(19, 20) # corresponds to 18, 19, the Spanish flu
+S_WW2 <- c(41, 42, 43, 44, 45, 46) # corresponds to 40, ..., 45 in years, the WW2
+S <- c(S_flu, S_WW2) # all shocked years
+
+col_map <- rep(2, N) #for coloring in the plots below
+col_map[S] <- 1
+
+DR20_24 <- filter(NorwayData, Age == "20-24") |>
+            filter(Year >= 1900 & Year <= 1970)
+
+plot_20 <- ggplot(DR20_24, aes(Year, death_rate, color = factor(col_map))) + 
+          geom_point() +
+          labs(x = "Year", y = "Death rate") +
+          theme(legend.position = "none")
+
+DR60_64 <- filter(NorwayData, Age == "60-64") |>
+            filter(Year >= 1900 & Year <= 1970)
+
+plot_60 <- ggplot(DR60_64, aes(Year, death_rate, color = factor(col_map))) + 
+          geom_point() +
+          labs(x = "Year", y = "Death rate") +
+          theme(legend.position = "none")
+
+plot_20_60 <- ggarrange(plot_20, plot_60, ncol = 2)
+
+death_rate_figure <- annotate_figure(plot_20_60, top = "Death rates for ages 20-24(left) and 60-64(right)")
+
+death_rate_figure
+
+#save the figure
+ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/death_rate_fig.pdf", plot = death_rate_figure)
+```
+
+# Models 
+
+The standard ARW1 with one extra precision for transitions involving shocked years.
+```{r}
+inla.rgeneric.AdaptiveRW1.model = function(
+  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
+  theta = NULL)
+{
+  #Input:
+  #N is the number of timepoints
+  #conflict_years
+  #prior_str is either Gamma0.005, Gamma0.00005 or PC
+  
+  envir = parent.env(environment())
+  
+  interpret_theta <- function() { return(list(tau1 = exp(theta[1L]), 
+                                              tau2 = exp(theta[2L])))}
+  
+  graph <- function() {return(Q())}
+  
+  Q <- function() {
+    R1 <- matrix(0, nrow = N, ncol = N) #non-conflict
+    R2 <- matrix(0, nrow = N, ncol = N) #conflict
+    for( i in 1:(N - 1)){
+      if(i %in% conflict_years | (i + 1) %in% conflict_years) {
+        R2[c(i, i+1), c(i, i+1)] <- R2[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
+      }
+      else {
+        R1[c(i, i+1), c(i, i+1)] <- R1[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
+      }
+    }
+    gv <- exp(1 / N * sum(log(diag(INLA:::inla.ginv(R1 + R2))))) #scaling constant
+    R_star_list <- list(R1 = R1*gv, R2 = R2*gv)
+    
+    p <- interpret_theta()
+    Q <- R_star_list$R1 * p$tau1 + R_star_list$R2 * p$tau2
+    return(inla.as.sparse(Q)) #sparse representation
+  }
+  
+  mu <- function() {return(numeric(0))}
+  
+  initial <- function() {return(c(4, 4))}#Default initial for precisions is 4
+  
+  log.norm.const <- function() {return(numeric(0))}
+  
+  log.prior <- function() {#default: shape = 1, rate = 0.00005
+    p <- interpret_theta()
+    if(prior_str == "PC"){
+      prior <- inla.pc.dprec(p$tau1, u = 1, alpha = 0.01, log=TRUE) + log(p$tau1) +
+          inla.pc.dprec(p$tau2, u = 1, alpha = 0.01, log = TRUE) + log(p$tau2)
+      return(prior)
+    } else if(prior_str == "Gamma0,005"){
+      prior <- dgamma(p$tau1, shape = 1, rate = 0.005, log = TRUE) + log(p$tau1) +
+      dgamma(p$tau2, shape = 1, rate = 0.005, log = TRUE) + log(p$tau2)
+      return(prior)
+    }
+    prior <- dgamma(p$tau1, shape = 1, rate = 0.00005, log = TRUE) + log(p$tau1) +
+    dgamma(p$tau2, shape = 1, rate = 0.00005, log = TRUE) + log(p$tau2)
+    return(prior) 
+  }
+  
+  quit <- function() {return(invisible())}
+  
+  #to ensure theta is defined
+  if (!length(theta)) theta = initial()
+  
+  vals <- do.call(match.arg(cmd), args = list())
+  return(vals)
+}
+```
+
+
+The more flexible ARW1 with a separate precision for each shock event. Compared to the previous model we need to pass two lists of conflict points, will assume they do not border each other. Need to make three structure matrices, and also have three parameters in interpret theta and for the log.prior. 
+```{r}
+inla.rgeneric.AdaptiveRW1.model_3tau = function(
+  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
+  theta = NULL)
+{
+  #Input:
+  #N is the number of timepoints
+  #conflict_years1 is the first event
+  #conflict_years2 is the second event
+  #prior_str is either Gamma0.005, Gamma0.00005 or PC
+  
+  envir = parent.env(environment())
+  
+  interpret_theta <- function() { return(list(tau1 = exp(theta[1L]), 
+                                              tau2 = exp(theta[2L]),
+                                              tau3 = exp(theta[3L])))}
+  
+  graph <- function() {return(Q())}
+  
+  Q <- function() {
+    R1 <- matrix(0, nrow = N, ncol = N) #non-shocked
+    R2 <- matrix(0, nrow = N, ncol = N) #shocked 1
+    R3 <- matrix(0, nrow = N, ncol = N) #shocked 2
+    for( i in 1:(N - 1)){
+      if(i %in% conflict_years1 | (i + 1) %in% conflict_years1) {
+        R2[c(i, i+1), c(i, i+1)] <- R2[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
+      }
+      else if(i %in% conflict_years2 | (i + 1) %in% conflict_years2) {
+        R3[c(i, i+1), c(i, i+1)] <- R3[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
+      } else{
+        R1[c(i, i+1), c(i, i+1)] <- R1[c(i, i+1), c(i, i+1)] + c(1, -1, -1, 1)
+      }
+    }
+    gv <- exp(1 / N * sum(log(diag(INLA:::inla.ginv(R1 + R2 + R3))))) #scaling constant
+    R_star_list <- list(R1 = R1*gv, R2 = R2*gv, R3 = R3*gv)
+    
+    p <- interpret_theta()
+    Q <- R_star_list$R1 * p$tau1 + R_star_list$R2 * p$tau2 + R_star_list$R3 * p$tau3
+    return(inla.as.sparse(Q)) #sparse representation
+  }
+  
+  mu <- function() {return(numeric(0))}
+  
+  initial <- function() {return(c(4, 4, 4))}#Default initial for precisions is 4
+  
+  log.norm.const <- function() {return(numeric(0))}
+  
+  log.prior <- function() {#default: shape = 1, rate = 0.00005
+    p <- interpret_theta()
+    if(prior_str == "PC"){
+      prior <- inla.pc.dprec(p$tau1, u = 1, alpha = 0.01, log=TRUE) + log(p$tau1) +
+          inla.pc.dprec(p$tau2, u = 1, alpha = 0.01, log = TRUE) + log(p$tau2) + 
+          inla.pc.dprec(p$tau3, u = 1, alpha = 0.01, log = TRUE) + log(p$tau3)
+      return(prior)
+    } else if(prior_str == "Gamma0,005"){
+      prior <- dgamma(p$tau1, shape = 1, rate = 0.005, log = TRUE) + log(p$tau1) +
+               dgamma(p$tau2, shape = 1, rate = 0.005, log = TRUE) + log(p$tau2) +
+               dgamma(p$tau3, shape = 1, rate = 0.005, log = TRUE) + log(p$tau3)
+      return(prior)
+    }
+    prior <- dgamma(p$tau1, shape = 1, rate = 0.00005, log = TRUE) + log(p$tau1) +
+             dgamma(p$tau2, shape = 1, rate = 0.00005, log = TRUE) + log(p$tau2) +
+             dgamma(p$tau3, shape = 1, rate = 0.00005, log = TRUE) + log(p$tau3)
+    return(prior) 
+  }
+  
+  quit <- function() {return(invisible())}
+  
+  #to ensure theta is defined
+  if (!length(theta)) theta = initial()
+  
+  vals <- do.call(match.arg(cmd), args = list())
+  return(vals)
+}
+
+```
+
+
+# Fitting the models
+
+## The standard RW1
+
+```{r}
+# Defining the model
+DR20_24$us <- 1:N #adding columns for the latent models
+DR20_24$time <- 1:N
+P <- 10000
+
+prior_str <- "Gamma0,00005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+
+if(prior_str == "Gamma0,00005"){
+  formula_RW1 <- death_rate ~ f(time, model = "rw1")  + f(us, model = "iid")
+} else if(prior_str == "Gamma0,005"){
+  formula_RW1 <- death_rate ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
+} else{
+  formula_RW1 <- death_rate ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
+}
+
+res_RW1 <- inla(formula_RW1, family = "gaussian", data = DR20_24, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(P), fixed = TRUE))))
+
+summary(res_RW1)
+```
+
+
+## The adaptive RW1 with 2 total precisions
+
+```{r}
+
+ARW1 <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
+                      N = N, conflict_years = S, prior_str = prior_str)
+
+formula_ARW1 <- death_rate ~ f(time, model = ARW1)  + f(us, model = "iid")
+
+res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = DR20_24, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(P), fixed = TRUE))))
+
+summary(res_ARW1)
+
+```
+
+
+## The adaptive RW1 with 3 total precsions
+
+```{r}
+ARW1_3tau <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model_3tau, 
+                N = N, conflict_years1 = S_flu, conflict_years2 = S_WW2, prior_str = prior_str)
+
+formula_ARW1_3tau <- death_rate ~ f(time, model = ARW1_3tau)  + f(us, model = "iid")
+
+res_ARW1_3tau <- inla(formula_ARW1_3tau, family = "gaussian", data = DR20_24, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(P), fixed = TRUE))))
+
+summary(res_ARW1_3tau)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

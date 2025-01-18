@@ -1590,32 +1590,6 @@ abline(0, 1)
 
 
 
-#The actual data - Yearly death rates from Norway
-We are spesifically interested in periods where we expect shocks, for instance the spanish flu in circa 1920 (source) and ww2 (source). The data is from (source:HMD, and link in sourcelist overleaf), and it is changed and revised periodically, so might me changes. Copied the data from the txt file, and only removed the first line with info about the dataset.
-
-https://www.mortality.org/Country/Country?cntr=NOR
-Used the dataset for deaths and 5x1 for ageinterval and yearinterval.
-For population I used 5-year, which is yearly and splits age by 5 year intervals.Both are in the column 5x1 and in the section of complete datasets.
-
-```{r}
-DeathsNorway <- read.table("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-data/DeathsNorway.txt", sep = "", header = TRUE, fill = TRUE)
-
-PopulationNorway <- read.table("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-data/PopulationNorway.txt", sep = "", header = TRUE, fill = TRUE)
-
-colnames(DeathsNorway)[5] <- "deaths"
-NorwayData <- cbind(DeathsNorway, PopulationNorway[1:4272, "Total"]) #remove the population data for 2024 as there is no deaths data yet
-
-colnames(NorwayData)[6] <- "population"
-
-NorwayData$death_rate <- NorwayData$deaths/NorwayData$population
-
-library(dplyr)
-DR20_24 <- filter(NorwayData, Age == "20-24")
-
-plot(DR20_24$Year, DR20_24$death_rate)
-```
-
-
 
 
 
