@@ -38,6 +38,7 @@ library(dplyr) #for filter and more
 library(ggplot2)
 library(ggpubr)
 library(INLA)
+library(gridExtra)
 
 N <- 71
 S_flu <- c(19, 20) # corresponds to 18, 19, the Spanish flu
@@ -232,9 +233,9 @@ inla.rgeneric.AdaptiveRW1.model_3tau = function(
 # Defining the model
 DR20_24$us <- 1:N #adding columns for the latent models
 DR20_24$time <- 1:N
-P <- 10000
+P <- 10000000
 
-prior_str <- "Gamma0,00005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
 
 if(prior_str == "Gamma0,00005"){
   formula_RW1 <- death_rate ~ f(time, model = "rw1")  + f(us, model = "iid")
@@ -249,7 +250,7 @@ res_RW1 <- inla(formula_RW1, family = "gaussian", data = DR20_24,
                     control.family = list(hyper = list(prec = 
                                     list(initial = log(P), fixed = TRUE))))
 
-summary(res_RW1)
+#summary(res_RW1)
 ```
 
 
@@ -260,14 +261,15 @@ summary(res_RW1)
 ARW1 <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
                       N = N, conflict_years = S, prior_str = prior_str)
 
-formula_ARW1 <- death_rate ~ f(time, model = ARW1)  + f(us, model = "iid")
+formula_ARW1 <- death_rate ~ f(time, model = ARW1, extraconstr = 
+                  list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
 
 res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = DR20_24, 
                     control.compute = list(cpo = TRUE), 
                     control.family = list(hyper = list(prec = 
                                     list(initial = log(P), fixed = TRUE))))
 
-summary(res_ARW1)
+#summary(res_ARW1)
 
 ```
 
@@ -278,16 +280,103 @@ summary(res_ARW1)
 ARW1_3tau <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model_3tau, 
                 N = N, conflict_years1 = S_flu, conflict_years2 = S_WW2, prior_str = prior_str)
 
-formula_ARW1_3tau <- death_rate ~ f(time, model = ARW1_3tau)  + f(us, model = "iid")
+formula_ARW1_3tau <- death_rate ~ f(time, model = ARW1_3tau, extraconstr = 
+                    list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
 
 res_ARW1_3tau <- inla(formula_ARW1_3tau, family = "gaussian", data = DR20_24, 
                     control.compute = list(cpo = TRUE), 
                     control.family = list(hyper = list(prec = 
                                     list(initial = log(P), fixed = TRUE))))
 
-summary(res_ARW1_3tau)
+#summary(res_ARW1_3tau)
 ```
 
+## Show the results with this configuration
+lets now try and see how well the models fit the data and calculate the RMSE and LS.
+
+```{r}
+#plotting
+df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_RW1$summary.fitted.values$mean))
+
+plot_20_RW1 <- ggplot(df, aes(Year)) + 
+      geom_point(aes(y = death_rate, color = factor(col_map))) +
+      geom_line(aes(y = eta), color = "blue") +  
+      labs(x = "Year", y = "Death rate") +
+      theme(legend.position = "none") +
+      annotate("text", x = 1960, y = max(df$death_rate), label = "RW1",size = 5)
+
+#de to er like
+#res_RW1$summary.fitted.values$mean
+#res_RW1$summary.linear.predictor$mean
+
+df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1$summary.fitted.values$mean))
+
+plot_20_ARW1 <- ggplot(df, aes(Year)) + 
+      geom_point(aes(y = death_rate, color = factor(col_map))) +
+      geom_line(aes(y = eta), color = "blue") +  
+      labs(x = "Year", y = "Death rate") +
+      theme(legend.position = "none") +
+      annotate("text", x = 1960, y = max(df$death_rate), label = "ARW1",size = 5)
+
+df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1_3tau$summary.fitted.values$mean))
+
+plot_20_ARW1_3tau <- ggplot(df, aes(Year)) + 
+      geom_point(aes(y = death_rate, color = factor(col_map))) +
+      geom_line(aes(y = eta), color = "blue") +  
+      labs(x = "Year", y = "Death rate") +
+      theme(legend.position = "none") + 
+      annotate("text", x = 1960, y = max(df$death_rate), label = "ARW1_3tau",size = 5)
+
+#make all the three plots together
+
+#RMSE
+RMSE1 <- sqrt(mean((DR20_24$death_rate - res_RW1$summary.fitted.values$mean)**2))
+RMSE2 <- sqrt(mean((DR20_24$death_rate - res_ARW1$summary.fitted.values$mean)**2))
+RMSE3 <- sqrt(mean((DR20_24$death_rate - res_ARW1_3tau$summary.fitted.values$mean)**2))
+RMSE <- c(RMSE1, RMSE2, RMSE3)
+
+LS1 <- -mean(log(res_RW1$cpo$cpo))
+LS2 <- -mean(log(res_ARW1$cpo$cpo))
+LS3 <- -mean(log(res_ARW1_3tau$cpo$cpo))
+LS <- c(LS1, LS2, LS3)
+
+data <- data.frame(Method = c("RW1", "ARW1", "ARW1_3tau"), RMSE = RMSE, LS = LS)
+
+ss <- tableGrob(data)
+
+result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, ss, nrow = 2, top = "With P = 10^7 and PC")
+
+#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/res_P10^7_PC.pdf", plot = result_plot, height = 6, width = 8, units = "in")
+
+```
+
+
+### Transforming the parameters from the internal theta scale to standard scale
+transforming the marginals for the internal thetas to become precision parameters.
+```{r}
+exp_func <- function(x){
+  return(exp(x))
+}
+
+#for RW1
+res_RW1$summary.hyperpar
+
+#for ARW1
+res_ARW1$summary.hyperpar[3,]
+inla.qmarginal(c(0.025, 0.5, 0.975), inla.tmarginal(exp_func, res_ARW1$marginals.hyperpar$`Theta1 for time`))
+inla.qmarginal(c(0.025, 0.5, 0.975), inla.tmarginal(exp_func, res_ARW1$marginals.hyperpar$`Theta2 for time`))
+
+#We see that that the iid has the highest precision, then non-shocked RW precision and then the shocked RW precision has the lowest precision
+
+#for ARW1_3tau
+res_ARW1_3tau$summary.hyperpar
+
+
+
+```
+
+
+# Maybe try without iid term or different priors, maybe also scale the RW1 if it is not the default
 
 
 
