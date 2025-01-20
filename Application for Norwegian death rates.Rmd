@@ -233,7 +233,7 @@ inla.rgeneric.AdaptiveRW1.model_3tau = function(
 # Defining the model
 DR20_24$us <- 1:N #adding columns for the latent models
 DR20_24$time <- 1:N
-P <- 10000000
+P <- 1000000000
 
 prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
 
@@ -344,10 +344,11 @@ data <- data.frame(Method = c("RW1", "ARW1", "ARW1_3tau"), RMSE = RMSE, LS = LS)
 
 ss <- tableGrob(data)
 
-result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, ss, nrow = 2, top = "With P = 10^7 and PC")
+result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, ss, nrow = 2, top = "With P = 10^9 and PC")
 
-#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/res_P10^7_PC.pdf", plot = result_plot, height = 6, width = 8, units = "in")
+#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/res_P10^9_PC.pdf", plot = result_plot, height = 6, width = 8, units = "in")
 
+res_ARW1$cpo$failure
 ```
 
 
