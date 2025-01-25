@@ -233,24 +233,33 @@ inla.rgeneric.AdaptiveRW1.model_3tau = function(
 # Defining the model
 DR20_24$us <- 1:N #adding columns for the latent models
 DR20_24$time <- 1:N
-P <- 1000000000
+DR20_24$deaths <- as.integer(DR20_24$deaths)
+#P <- 1000000000
+
 
 prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+family <- "nbinomial"
 
 if(prior_str == "Gamma0,00005"){
-  formula_RW1 <- death_rate ~ f(time, model = "rw1")  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1")  + f(us, model = "iid")
 } else if(prior_str == "Gamma0,005"){
-  formula_RW1 <- death_rate ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
 } else{
-  formula_RW1 <- death_rate ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
 }
 
-res_RW1 <- inla(formula_RW1, family = "gaussian", data = DR20_24, 
-                    control.compute = list(cpo = TRUE), 
-                    control.family = list(hyper = list(prec = 
-                                    list(initial = log(P), fixed = TRUE))))
+# res_RW1 <- inla(formula_RW1, family = "gaussian", data = DR20_24, 
+#                     control.compute = list(cpo = TRUE), 
+#                     control.family = list(hyper = list(prec = 
+#                                     list(initial = log(P), fixed = TRUE))))
 
 #summary(res_RW1)
+
+#the poisson model
+res_RW1 <- inla(formula_RW1, family = family, E = population , data = DR20_24,
+           control.compute = list(cpo = TRUE))
+
+summary(res_RW1)
 ```
 
 
@@ -261,15 +270,19 @@ res_RW1 <- inla(formula_RW1, family = "gaussian", data = DR20_24,
 ARW1 <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
                       N = N, conflict_years = S, prior_str = prior_str)
 
-formula_ARW1 <- death_rate ~ f(time, model = ARW1, extraconstr = 
+formula_ARW1 <- deaths ~ f(time, model = ARW1, extraconstr = 
                   list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
 
-res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = DR20_24, 
-                    control.compute = list(cpo = TRUE), 
-                    control.family = list(hyper = list(prec = 
-                                    list(initial = log(P), fixed = TRUE))))
+# res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = DR20_24, 
+#                     control.compute = list(cpo = TRUE), 
+#                     control.family = list(hyper = list(prec = 
+#                                     list(initial = log(P), fixed = TRUE))))
 
 #summary(res_ARW1)
+
+#the poisson model
+res_ARW1 <- inla(formula_ARW1, family = family, E = population , data = DR20_24,
+           control.compute = list(cpo = TRUE))
 
 ```
 
@@ -280,15 +293,20 @@ res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = DR20_24,
 ARW1_3tau <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model_3tau, 
                 N = N, conflict_years1 = S_flu, conflict_years2 = S_WW2, prior_str = prior_str)
 
-formula_ARW1_3tau <- death_rate ~ f(time, model = ARW1_3tau, extraconstr = 
+formula_ARW1_3tau <- deaths ~ f(time, model = ARW1_3tau, extraconstr = 
                     list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
 
-res_ARW1_3tau <- inla(formula_ARW1_3tau, family = "gaussian", data = DR20_24, 
-                    control.compute = list(cpo = TRUE), 
-                    control.family = list(hyper = list(prec = 
-                                    list(initial = log(P), fixed = TRUE))))
+# res_ARW1_3tau <- inla(formula_ARW1_3tau, family = "gaussian", data = DR20_24, 
+#                     control.compute = list(cpo = TRUE), 
+#                     control.family = list(hyper = list(prec = 
+#                                     list(initial = log(P), fixed = TRUE))))
 
-#summary(res_ARW1_3tau)
+summary(res_ARW1_3tau)
+summary(res_RW1)
+
+#the poisson model
+res_ARW1_3tau <- inla(formula_ARW1_3tau, family = family, E = population , data = DR20_24,
+           control.compute = list(cpo = TRUE))
 ```
 
 ## Show the results with this configuration
@@ -348,8 +366,11 @@ result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, ss, nr
 
 #ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/res_P10^9_PC.pdf", plot = result_plot, height = 6, width = 8, units = "in")
 
-res_ARW1$cpo$failure
+#INLA::inla.doc("poisson likelihood")
+
+#res_ARW1$cpo$failure
 ```
+
 
 
 ### Transforming the parameters from the internal theta scale to standard scale
@@ -371,6 +392,7 @@ inla.qmarginal(c(0.025, 0.5, 0.975), inla.tmarginal(exp_func, res_ARW1$marginals
 
 #for ARW1_3tau
 res_ARW1_3tau$summary.hyperpar
+inla.qmarginal(c(0.025, 0.5, 0.975), inla.tmarginal(exp_func, res_ARW1_3tau$marginals.hyperpar$`Theta1 for time`))
 
 
 
