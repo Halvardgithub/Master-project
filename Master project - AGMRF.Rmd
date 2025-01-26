@@ -1033,7 +1033,7 @@ annotate_figure(plot_eval_NCT_W_LS,
 
 Worth noting that their model also includes an iid normal latent term, so an unstructured random effect, in both the RW1 and the ARW1. 
 
-```{r}
+```{r, eval=FALSE}
 #some testing
 formula_RW1 <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
 

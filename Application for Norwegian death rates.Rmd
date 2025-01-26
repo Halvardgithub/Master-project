@@ -237,7 +237,7 @@ DR20_24$deaths <- as.integer(DR20_24$deaths)
 #P <- 1000000000
 
 
-prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+prior_str <- "Gamma0,005" # alternatives are Gamma0,005 and Gamma0,00005 and PC
 family <- "poisson"
 
 if(prior_str == "Gamma0,00005"){
@@ -301,8 +301,8 @@ formula_ARW1_3tau <- deaths ~ f(time, model = ARW1_3tau, extraconstr =
 #                     control.family = list(hyper = list(prec = 
 #                                     list(initial = log(P), fixed = TRUE))))
 
-summary(res_ARW1_3tau)
-summary(res_RW1)
+#summary(res_ARW1_3tau)
+#summary(res_RW1)
 
 #the poisson model
 res_ARW1_3tau <- inla(formula_ARW1_3tau, family = family, E = population , data = DR20_24,
@@ -313,10 +313,14 @@ res_ARW1_3tau <- inla(formula_ARW1_3tau, family = family, E = population , data 
 lets now try and see how well the models fit the data and calculate the RMSE and LS.
 
 ```{r}
+library(grid)
+
 #plotting
-df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_RW1$summary.fitted.values$mean))
+df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_RW1$summary.fitted.values$mean, lower = res_RW1$summary.fitted.values$'0.025quant',
+            upper = res_RW1$summary.fitted.values$'0.975quant'))
 
 plot_20_RW1 <- ggplot(df, aes(Year)) + 
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
       geom_point(aes(y = death_rate, color = factor(col_map))) +
       geom_line(aes(y = eta), color = "blue") +  
       labs(x = "Year", y = "Death rate") +
@@ -327,18 +331,22 @@ plot_20_RW1 <- ggplot(df, aes(Year)) +
 #res_RW1$summary.fitted.values$mean
 #res_RW1$summary.linear.predictor$mean
 
-df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1$summary.fitted.values$mean))
+df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1$summary.fitted.values$mean, lower = res_ARW1$summary.fitted.values$'0.025quant',
+            upper = res_ARW1$summary.fitted.values$'0.975quant'))
 
 plot_20_ARW1 <- ggplot(df, aes(Year)) + 
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
       geom_point(aes(y = death_rate, color = factor(col_map))) +
       geom_line(aes(y = eta), color = "blue") +  
       labs(x = "Year", y = "Death rate") +
       theme(legend.position = "none") +
       annotate("text", x = 1960, y = max(df$death_rate), label = "ARW1",size = 5)
 
-df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1_3tau$summary.fitted.values$mean))
+df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1_3tau$summary.fitted.values$mean, lower = res_ARW1_3tau$summary.fitted.values$'0.025quant',
+            upper = res_ARW1_3tau$summary.fitted.values$'0.975quant'))
 
 plot_20_ARW1_3tau <- ggplot(df, aes(Year)) + 
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
       geom_point(aes(y = death_rate, color = factor(col_map))) +
       geom_line(aes(y = eta), color = "blue") +  
       labs(x = "Year", y = "Death rate") +
@@ -362,13 +370,48 @@ data <- data.frame(Method = c("RW1", "ARW1", "ARW1_3tau"), RMSE = RMSE, LS = LS)
 
 ss <- tableGrob(data)
 
-result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, ss, nrow = 2, top = "With P = 10^9 and PC")
+result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob("With a Gamma(1, 0.005) prior and a Poisson likelihood", gp = (gpar(fontsize = 15))))
 
-#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/res_P10^9_PC.pdf", plot = result_plot, height = 6, width = 8, units = "in")
+
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
+
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
+
 
 #INLA::inla.doc("poisson likelihood")
 
 #res_ARW1$cpo$failure
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Assuming 'inla_model' is your fitted INLA model
+# Extract the summary of the linear predictor
+lp_summary <- res_ARW1_3tau$summary.fitted.values
+
+# Create a data frame for plotting
+plot_data <- data.frame(
+  x = 1:nrow(lp_summary),  # Or use your actual x-axis variable
+  mean = lp_summary$mean,
+  lower = lp_summary$`0.025quant`,
+  upper = lp_summary$`0.975quant`,
+  real_data = DR20_24$death_rate  # Replace with your actual data
+)
+
+# Create the plot
+ggplot(plot_data, aes(x = x)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "yellow", alpha = 0.5) +
+  geom_line(aes(y = mean), color = "blue") +
+  geom_point(aes(y = real_data), color = "red", size = 1) +
+  labs(
+    x = "X-axis Label",
+    y = "Linear Predictor",
+    title = "Linear Predictor with Uncertainty"
+  ) +
+  theme_minimal()
+
 ```
 
 

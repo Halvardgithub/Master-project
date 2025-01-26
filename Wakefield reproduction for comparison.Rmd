@@ -426,7 +426,7 @@ sh_300_NCT <- mod_eval_W(data_w_sHarm_300_NCT, "sHarm", "1/300", 300, "NCT")
 
 #load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", "Gamma0,00005", "/eval_df_", "harm", "_", "75", "_", "CT"))
 
-#starta den 12:20
+#starta den 16.55
 ```
 
 Now, lets combine all the evaluation criteria together in the same dataframe.
