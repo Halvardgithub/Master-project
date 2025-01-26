@@ -9,245 +9,6 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
-num_years <- 30
-data_template <- data.frame(region = "All", years = 1:num_years, logit.est = 0,
-                            var.est = 0, logit.prec = 0, region_num = 0,
-                            survey = NA, mean = NA, lower = NA, upper = NA,
-                            risk = 0)
-
-prec_settings <- data.frame(rbind(rep(75, num_years),
-                                  rep(150, num_years),
-                                  rep(300, num_years)))
-colnames(prec_settings) <- 1:num_years
-
-dat <- data_template
-dat$logit.prec <- unlist(prec_settings[1, ])
-dat$var.est <- 1 / dat$logit.prec
-
-trend <- 2
-trend <-
-      dat$risk[1] <- trend + 
-            rnorm(1, mean = 0, sd = 1 / sqrt(20))
-
-```
-
-
-```{r}
-#### Set simulation parameters ####
-num_reps <- 100
-num_years <- 30
-num_par_settings <- 6
-num_prec_settings <- 3
-
-# NA indicates the usage of the triangle trend
-par_settings <- data.frame(mu_1 = c(rep(-2, num_par_settings - 2), NA, NA),
-                           mu_2 = c(c(-2, -2, -1, -1), NA, NA),
-                           tau_1 = rep(20, num_par_settings),
-                           tau_2 = c(20, 10, 20, 10, 20, 10))
-triangle <- c(rep(-2, 8), 
-              seq(from = -2, to = -0.75, length.out = 5)[2:4], 
-              -0.75, 
-              seq(from = -2, to = -0.75, length.out = 5)[4:2], 
-              rep(-2, 15))
-prec_settings <- data.frame(rbind(rep(75, num_years),
-                                  rep(150, num_years),
-                                  rep(300, num_years)))
-colnames(prec_settings) <- 1:num_years
-
-#### Create structure matrices####
-conflict_years <- 9:15
-conflict_years_long <- rep(0, num_years)
-conflict_years_long[conflict_years] <- 1
-
-R_conflict <- matrix(0, num_years, num_years)
-R_nonconflict <- matrix(0, num_years, num_years)
-for(i in 1:num_years){
-    if(i == 1){
-        if(conflict_years_long[i] || conflict_years_long[i + 1]){
-            R_conflict[i, i] <- 1
-        }
-        else{
-            R_nonconflict[i, i] <- 1
-        }
-    }
-    else if(i == num_years){
-        if(conflict_years_long[i] || conflict_years_long[i - 1]){
-            R_conflict[i, i] <- 1
-        }
-        else{
-            R_nonconflict[i, i] <- 1
-        }
-    }
-    else{
-        if(conflict_years_long[i]|| (conflict_years_long[i - 1] && 
-                                     conflict_years_long[i + 1])){
-            R_conflict[i, i] <- 2
-            
-        }
-        else if(conflict_years_long[i - 1] || conflict_years_long[i + 1]){
-            R_conflict[i, i] <- 1
-            R_nonconflict[i, i] <- 1
-        }
-        else{
-            R_nonconflict[i, i] <- 2
-        }
-    }
-    
-    for(j in 1:num_years){
-        if(abs(i - j) == 1){
-            if(conflict_years_long[i] || conflict_years_long[j]){
-                R_conflict[i, j] <- -1
-            }
-            else{
-                R_nonconflict[i, j] <- -1
-            }
-        }
-    }
-}
-R_1 <- R_nonconflict
-R_2 <- R_conflict
-scaled_Q <- INLA:::inla.scale.model.bym.internal(R_1 + R_2, 
-                                                 adjust.for.con.comp = TRUE)$Q
-gv <- scaled_Q[1, 1] / (R_1 + R_2)[1, 1]
-R_1_star <- gv * R_1
-R_2_star <- gv * R_2
-R_1_star_hat <- R_1_star[2:num_years, 2:num_years]
-R_2_star_hat <- R_2_star[2:num_years, 2:num_years]
-eps <- eigen(solve(R_1_star_hat + R_2_star_hat) %*% R_2_star_hat)$values
-gamma_tilde <- c(1 / eigen(R_1_star + R_2_star)$values[1:(num_years - 1)], 0)
-
-#save(R_1_star, R_2_star, eps, gamma_tilde,
-#     file = "../Data/structure_matrices.RData")
-
-#### Simulate data ####
-data_template <- data.frame(region = "All", years = 1:num_years, logit.est = 0,
-                            var.est = 0, logit.prec = 0, region_num = 0,
-                            survey = NA, mean = NA, lower = NA, upper = NA,
-                            risk = 0)
-for(i in 1:num_prec_settings){
-    for(j in 1:num_par_settings){
-        for(k in 1:num_reps){
-            set.seed(37 * i * j * k)
-            #print(paste(i, j, k))
-            dat <- data_template
-            dat$logit.prec <- unlist(prec_settings[i, ])
-            dat$var.est <- 1 / dat$logit.prec
-            
-            for(l in 1:num_years){
-                if(l %in% conflict_years){
-                  if(!is.na(par_settings$mu_2[j])){
-                    trend <- par_settings$mu_2[j]
-                  }
-                  else{
-                    trend <- triangle[l]
-                  }
-                  trend <-
-                    dat$risk[l] <- trend + 
-                        rnorm(1, mean = 0, sd = 1 / sqrt(par_settings$tau_2[j]))
-                        
-                }
-                else{
-                  if(!is.na(par_settings$mu_1[j])){
-                    trend <- par_settings$mu_1[j]
-                  }
-                  else{
-                    trend <- triangle[l]
-                  }
-                    dat$risk[l] <- trend + 
-                        rnorm(1, mean = 0, sd = 1 / sqrt(par_settings$tau_1[j]))
-                    
-                }
-            }
-            dat$logit.est <- rnorm(num_years, mean = dat$risk,
-                                   sd = sqrt(dat$var.est))
-            
-            save(dat, 
-                 file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/dat_prec_", i, "_par_", j, "_rep_", k))
-        }
-    }
-}
-```
-The above generates the data as in the article, now lets create the dataframes in the same format as the simulated data i have made so I can easier apply my own functions to them.
-
-```{r}
-for(i in 1:num_prec_settings){
-  for(j in 1:num_par_settings){
-    df_y <- data.frame(matrix(0, nrow = num_years, ncol = num_reps))
-    df_eta <- data.frame(matrix(0, nrow = num_years, ncol = num_reps))
-    for(k in 1:num_reps){
-      load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/dat_prec_", i, "_par_", j, "_rep_", k))
-      df_y[, k] <- dat[, "logit.est"]
-      df_eta[, k] <- dat[, "risk"]
-    }
-    df_y$t <- 1:num_years
-    df_y$us <- 1:num_years
-    data_W <- list(df_y, df_eta)
-    save(data_W, file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_", i, "_par_", j))
-  }
-}
-```
-
-Now, lets perform the model fitting to their data with my model and other code. The functions used are defined further down int the notebook, and parts of the other.
-```{r}
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_1_par_1")
-f_75_CT <- mod_eval_W(data_W, "flat", "1/75", 75, "CT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_2_par_1")
-f_150_CT <- mod_eval_W(data_W, "flat", "1/150", 150, "CT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_3_par_1")
-f_300_CT <- mod_eval_W(data_W, "flat", "1/300", 300, "CT")
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_1_par_3")
-d_75_CT <- mod_eval_W(data_W, "delta", "1/75", 75, "CT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_2_par_3")
-d_150_CT <- mod_eval_W(data_W, "delta", "1/150", 150, "CT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_3_par_3")
-d_300_CT <- mod_eval_W(data_W, "delta", "1/300", 300, "CT")
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_1_par_5")
-t_75_CT <- mod_eval_W(data_W, "triangle", "1/75", 75, "CT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_2_par_5")
-t_150_CT <- mod_eval_W(data_W, "triangle", "1/150", 150, "CT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_3_par_5")
-t_300_CT <- mod_eval_W(data_W, "triangle", "1/300", 300, "CT")
-
-
-#Data with non-constant tau
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_1_par_2")
-f_75_NCT <- mod_eval_W(data_W, "flat", "1/75", 75, "NCT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_2_par_2")
-f_150_NCT <- mod_eval_W(data_W, "flat", "1/150", 150, "NCT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_3_par_2")
-f_300_NCT <- mod_eval_W(data_W, "flat", "1/300", 300, "NCT")
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_1_par_4")
-d_75_NCT <- mod_eval_W(data_W, "delta", "1/75", 75, "NCT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_2_par_4")
-d_150_NCT <- mod_eval_W(data_W, "delta", "1/150", 150, "NCT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_3_par_4")
-d_300_NCT <- mod_eval_W(data_W, "delta", "1/300", 300, "NCT")
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_1_par_6")
-t_75_NCT <- mod_eval_W(data_W, "triangle", "1/75", 75, "NCT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_2_par_6")
-t_150_NCT <- mod_eval_W(data_W, "triangle", "1/150", 150, "NCT")
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/data_W_prec_3_par_6")
-t_300_NCT <- mod_eval_W(data_W, "triangle", "1/300", 300, "NCT")
-
-```
-
-
-
-
-
-```{r}
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/dat_prec_1_par_1_rep_2")
-```
-
-Kan prøve å kjøre mine modeller med deres måte å finne RMSE, LS (cpo fra INLA i stedet) og tror de setter er prior på observasjons variansen, log(1) eller noe sånt. Må også endre triangle mean bittelitt til 1,25 og ikke bare 1,2.
-
-Instead of my defined LS, we will instead use the cpo from INLA as each $p(\omega)$ and then take the mean of their log, further we take minus of the average proper scoring so a lower value is prefered. So, we add a control compute cpo in the INLA call and get the values from res\$cpo\$cpo. Have also fixed the precision parameter for the gaussian family, ie. the observation varience. We fix the precsion to the assigned level known from the simulation of the data. They still use PC priors while I use the default prior for precisions, gamma priors. They also pass the following in the INLA call control.inla = list(strategy = "adaptive", int.strategy = "auto"). They also use Verbose = FALSE, which I believe is the default, and ensures INLA doesent print any updates about runtime etc.
-
 
 ```{r}
 N <- 30
@@ -285,24 +46,23 @@ mod_eval_W <- function(df, mean = "", V = "", P, tau = "") {
                     control.family = list(hyper = list(prec = 
                                     list(initial = log(P), fixed = TRUE))))
     LS_RW1 <- -mean(log(res_RW1$cpo$cpo))
-    RMSE_RW1 <- RMSE(df_eta[, i], res_RW1$summary.fitted.values$mean - 
-                       res_RW1$summary.random$us$mean)
+    RMSE_RW1 <- RMSE(df_eta[, i], res_RW1$summary.fitted.values$mean)
     
     res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
                      control.compute = list(cpo = TRUE),
                      control.family = list(hyper = list(prec = 
                                     list(initial = log(P), fixed = TRUE))))
     LS_ARW1 <- -mean(log(res_ARW1$cpo$cpo))
-    RMSE_ARW1 <- RMSE(df_eta[, i], res_ARW1$summary.fitted.values$mean -
-                        res_ARW1$summary.random$us$mean)
+    RMSE_ARW1 <- RMSE(df_eta[, i], res_ARW1$summary.fitted.values$mean)
     
     eval_df[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
     
     #Saving the fits
-     save(res_RW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/RW1/fit_W_", mean, "_", P, "_", tau, "_", i))
-     save(res_ARW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/ARW1/fit_W_", mean, "_", P, "_", tau, "_", i))
+     #save(res_RW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/RW1/fit_W_", mean, "_", P, "_", tau, "_", i))
+     #save(res_ARW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/ARW1/fit_W_", mean, "_", P, "_", tau, "_", i))
   }
-  save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results_W/eval_df_", mean, "_", P, "_", tau))
+  #save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results_W/eval_df_", mean, "_", P, "_", tau))
+  save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", prior_str, "/eval_df_", mean, "_", P, "_", tau))
   
   #plot_RMSE <- myboxplot2(eval_df[, c("RMSE_RW1", "RMSE_ARW1")], mean, V)
   #plot_LS <- myboxplot2(eval_df[, c("LS_RW1", "LS_ARW1")], mean, V)
@@ -310,7 +70,7 @@ mod_eval_W <- function(df, mean = "", V = "", P, tau = "") {
   return()
 }
 
-#example of loading a fit for a ARW1
+#example of loading a fit for an ARW1
 #load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Fits_W/ARW1/fit_W_flat_75_CT_3")
 #summary(res_ARW1)
 #load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Results_W/eval_df_flat_75_CT")
@@ -588,538 +348,203 @@ plot_realizations(plotting_df, "Comparison for Wakefield with triangle mean")
 ```
 
 
-```{r}
 
-D = (1 / (1 - 0.05)) * diag(5) 
-QQ = rbind(cbind(D, -sqrt(1) * D),
-           cbind(-sqrt(1) * D, 
-                 D + D + D))
-QQ
+# Harmonius mean evaluation
+
+first, lets get the data, will use the sim_dataframe_sine from Master project.
+```{r}
+#parameters
+N <- 30
+n <- 100
+tau1 <- 20 #latent precision in the iid noise
+tau2 <- 10
+o <- 1 # the offset for points 9-15
+
+t <- 1:N
+mean_sine <- sin(pi*t/15)
+
+#constant tau and no offset
+data_w_harm_75_CT <- sim_dataframe_sine(n, mean_sine, 1/75, tau1, tau1, 0)
+data_w_harm_150_CT <- sim_dataframe_sine(n, mean_sine, 1/150, tau1, tau1, 0)
+data_w_harm_300_CT <- sim_dataframe_sine(n, mean_sine, 1/300, tau1, tau1, 0)
+
+#constant tau with offset
+data_w_sHarm_75_CT <- sim_dataframe_sine(n, mean_sine, 1/75, tau1, tau1, 1)
+data_w_sHarm_150_CT <- sim_dataframe_sine(n, mean_sine, 1/150, tau1, tau1, 1)
+data_w_sHarm_300_CT <- sim_dataframe_sine(n, mean_sine, 1/300, tau1, tau1, 1)
+
+#non constant tau and no offset
+data_w_harm_75_NCT <- sim_dataframe_sine(n, mean_sine, 1/75, tau1, tau2, 0)
+data_w_harm_150_NCT <- sim_dataframe_sine(n, mean_sine, 1/150, tau1, tau2, 0)
+data_w_harm_300_NCT <- sim_dataframe_sine(n, mean_sine, 1/300, tau1, tau2, 0)
+
+#non constant tau with offset
+data_w_sHarm_75_NCT <- sim_dataframe_sine(n, mean_sine, 1/75, tau1, tau2, 1)
+data_w_sHarm_150_NCT <- sim_dataframe_sine(n, mean_sine, 1/150, tau1, tau2, 1)
+data_w_sHarm_300_NCT <- sim_dataframe_sine(n, mean_sine, 1/300, tau1, tau2, 1)
 ```
 
-
-
-
-Just copying all their code to make sure i get the same results, although I set $n = 20$ instead of $100$.
-
-Simulate the data:
+Define the model and the inla formulas used in the modelling.
 ```{r}
-#### Set simulation parameters ####
-num_reps <- 40 # 2*n
-num_years <- 30
-num_par_settings <- 6
-num_prec_settings <- 3
+N <- 30
+conf_years <- c(9, 10, 11, 12, 13, 14, 15)
+prior_str <- "Gamma0,005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
 
-# NA indicates the usage of the triangle trend
-par_settings <- data.frame(mu_1 = c(rep(-2, num_par_settings - 2), NA, NA),
-                           mu_2 = c(c(-2, -2, -1, -1), NA, NA),
-                           tau_1 = rep(20, num_par_settings),
-                           tau_2 = c(20, 10, 20, 10, 20, 10))
-triangle <- c(rep(-2, 8), 
-              seq(from = -2, to = -0.75, length.out = 5)[2:4], 
-              -0.75, 
-              seq(from = -2, to = -0.75, length.out = 5)[4:2], 
-              rep(-2, 15))
-prec_settings <- data.frame(rbind(rep(150, num_years),
-                                  rep(300, num_years),
-                                  rep(75, num_years)))
-colnames(prec_settings) <- 1:num_years
+if(prior_str == "Gamma0,00005"){
+  formula_RW1 <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
+} else if(prior_str == "Gamma0,005"){
+  formula_RW1 <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
+} else{
+  formula_RW1 <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
+}
 
-#### Create structure matrices####
-conflict_years <- 9:15
-conflict_years_long <- rep(0, num_years)
-conflict_years_long[conflict_years] <- 1
+#R_star_list_W <- Scaled_structure_matrices_for_ARW1(N, conf_years)
+ARW1_model_W <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model2, 
+                        N = N, conflict_years = conf_years, prior_str = prior_str)
+formula_ARW1_W <- y ~ f(time, model = ARW1_model_W,
+                extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0)) +
+                f(us, model = "iid")
+```
 
-R_conflict <- matrix(0, num_years, num_years)
-R_nonconflict <- matrix(0, num_years, num_years)
-for(i in 1:num_years){
-    if(i == 1){
-        if(conflict_years_long[i] || conflict_years_long[i + 1]){
-            R_conflict[i, i] <- 1
-        }
-        else{
-            R_nonconflict[i, i] <- 1
-        }
+Now, lets perform the model evaluation in each case with a given prior.
+```{r}
+h_75_CT <- mod_eval_W(data_w_harm_75_CT, "harm", "1/75", 75, "CT")
+h_150_CT <- mod_eval_W(data_w_harm_150_CT, "harm", "1/150", 150, "CT")
+h_300_CT <- mod_eval_W(data_w_harm_300_CT, "harm", "1/300", 300, "CT")
+
+sh_75_CT <- mod_eval_W(data_w_sHarm_75_CT, "sHarm", "1/75", 75, "CT")
+sh_150_CT <- mod_eval_W(data_w_sHarm_150_CT, "sHarm", "1/150", 150, "CT")
+sh_300_CT <- mod_eval_W(data_w_sHarm_300_CT, "sHarm", "1/300", 300, "CT")
+
+h_75_NCT <- mod_eval_W(data_w_harm_75_NCT, "harm", "1/75", 75, "NCT")
+h_150_NCT <- mod_eval_W(data_w_harm_150_NCT, "harm", "1/150", 150, "NCT")
+h_300_NCT <- mod_eval_W(data_w_harm_300_NCT, "harm", "1/300", 300, "NCT")
+
+sh_75_NCT <- mod_eval_W(data_w_sHarm_75_NCT, "sHarm", "1/75", 75, "NCT")
+sh_150_NCT <- mod_eval_W(data_w_sHarm_150_NCT, "sHarm", "1/150", 150, "NCT")
+sh_300_NCT <- mod_eval_W(data_w_sHarm_300_NCT, "sHarm", "1/300", 300, "NCT")
+
+#load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", "Gamma0,00005", "/eval_df_", "harm", "_", "75", "_", "CT"))
+
+#starta den 12:20
+```
+
+Now, lets combine all the evaluation criteria together in the same dataframe.
+```{r}
+#splicing the eval df's together to one with sensible column names
+means <- c("harm", "sHarm")
+precs <- c("75", "150", "300")
+taus <- c("CT", "NCT")
+
+for(m in 1:length(means)){
+  for(p in 1:length(precs)){
+    for(t in 1:length(taus)){
+      load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", prior_str, "/eval_df_", means[m], "_", precs[p], "_", taus[t]))
+      index_str <- paste0("_", means[m], "_", precs[p], "_", taus[t])
+      colnames(eval_df) <- c(paste0("RMSE_RW1", index_str), paste0("LS_RW1", index_str), paste0("RMSE_ARW1", index_str), paste0("LS_ARW1", index_str))
+      if(m == 1 & p == 1 & t == 1){
+        full_eval_df <- eval_df
+      }
+      else{
+        full_eval_df <- cbind(full_eval_df, eval_df)
+      }
     }
-    else if(i == num_years){
-        if(conflict_years_long[i] || conflict_years_long[i - 1]){
-            R_conflict[i, i] <- 1
-        }
-        else{
-            R_nonconflict[i, i] <- 1
-        }
-    }
-    else{
-        if(conflict_years_long[i]|| (conflict_years_long[i - 1] && 
-                                     conflict_years_long[i + 1])){
-            R_conflict[i, i] <- 2
-            
-        }
-        else if(conflict_years_long[i - 1] || conflict_years_long[i + 1]){
-            R_conflict[i, i] <- 1
-            R_nonconflict[i, i] <- 1
-        }
-        else{
-            R_nonconflict[i, i] <- 2
-        }
-    }
+  }
+}
+save(full_eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", prior_str,"/full_eval_df"))
+```
+
+Now, lets define the plotting functions to make the boxplot figures with RMSE and LS.
+
+```{r}
+library(ggpubr) #for plotlist in ggarrange
+# install.packages('latex2exp')
+# library(latex2exp)
+
+box_plot_eval_harm <- function(df, mean, P, ymin, ymax, x_text_bool){
+  if(mean == "harm"){mean <- "sine"}
+  else {mean <- "offset sine"}
+  
+  colnames(df) <- c("RW1", "ARW1")
+  # Reshape data to long format
+  df_long <- df %>%
+    pivot_longer(cols = everything(), names_to = "Category", values_to = "Value")
+  
+  # Create the boxplot
+  eval_plot <- ggplot(df_long, aes(x = Category, y = Value, fill = Category)) +
+    geom_boxplot() +
+    ggtitle(paste0("Mu: ", mean, ", V: 1/", P)) + xlab("") + ylab("") +
+    ylim(ymin, ymax) + 
+    scale_fill_manual(values = c("RW1" = "skyblue", "ARW1" = "orange")) +
+    theme(legend.position ="none") + 
+    if(x_text_bool){theme()}
+    else{theme(axis.text.x = element_blank())}
+  return(eval_plot)
+}
+
+make_full_box_plot <- function(df, criteria, tau, prior){
+  #Input: df is a full_eval_df, criteria is either "RMSE" or "LS" while tau is either "CT" or "NCT"
+  # and prior is the specific prior for the precision
+  precs <- c("75", "150", "300")
+  means <- c("harm", "sHarm")
+  if(prior == "Gamma0,00005"){prior_name <- "Gamma(1, 0.00005)"}
+  else if(prior == "Gamma0,005"){prior_name <- "Gamma(1, 0.005)"}
+  else{prior_name <- "PC(1, 0.01)"}
+  
+  plot_list <- list()
+  x_text_bool <- FALSE
+  for(m in 1:length(means)){
+    if(m == length(means)){x_text_bool <- TRUE} #decides if the x_text shows or not
+    RW1_str <- paste0(criteria, "_RW1_", means[m], "_") #needs "P_tau"
+    ARW1_str <- paste0(criteria, "_ARW1_", means[m], "_") #needs "P_tau"
+    df_exempt <- df[, c(paste0(RW1_str, precs[1], "_", tau), paste0(RW1_str, precs[2], "_", tau), paste0(RW1_str, precs[3], "_", tau), paste0(ARW1_str, precs[1], "_", tau), paste0(ARW1_str, precs[2], "_", tau), paste0(ARW1_str, precs[3], "_", tau))] #the relevant columns of df
     
-    for(j in 1:num_years){
-        if(abs(i - j) == 1){
-            if(conflict_years_long[i] || conflict_years_long[j]){
-                R_conflict[i, j] <- -1
-            }
-            else{
-                R_nonconflict[i, j] <- -1
-            }
-        }
+    #Find the min and max value to enforce the same y-axis for the same mean
+    ymax <- max(df_exempt) 
+    ymin <- min(df_exempt)
+    
+    for(p in 1:length(precs)){
+      plot_list[[(m-1)*3 + p]] <- box_plot_eval_harm(df_exempt[, c(p, p +
+      length(precs))],means[m], precs[p], ymin, ymax, x_text_bool)
     }
+  }
+  plot <- ggarrange(plotlist = plot_list, ncol = 3, nrow = 2)
+  #making the title
+  title <- paste0(criteria, " for Wakefield data with ")
+  if(tau == "CT"){title <- paste0(title, "constant tau and ")}
+  else{title <- paste0(title, "non-constant tau and ")}
+  title <- paste0(title, prior_name)
+  
+  plot_w_title <- annotate_figure(plot, top = text_grob(title))
+  ggsave(filename = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/Plots/", criteria, "_", tau, "_", prior, ".pdf"), plot = plot_w_title, width = 8, height = 5, units = "in")
+  return(plot_w_title)
 }
-R_1 <- R_nonconflict
-R_2 <- R_conflict
-scaled_Q <- INLA:::inla.scale.model.bym.internal(R_1 + R_2, 
-                                                 adjust.for.con.comp = TRUE)$Q
-gv <- scaled_Q[1, 1] / (R_1 + R_2)[1, 1]
-R_1_star <- gv * R_1
-R_2_star <- gv * R_2
-R_1_star_hat <- R_1_star[2:num_years, 2:num_years]
-R_2_star_hat <- R_2_star[2:num_years, 2:num_years]
-eps <- eigen(solve(R_1_star_hat + R_2_star_hat) %*% R_2_star_hat)$values
-gamma_tilde <- c(1 / eigen(R_1_star + R_2_star)$values[1:(num_years - 1)], 0)
-
-save(R_1_star, R_2_star, eps, gamma_tilde,
-     file = "C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/structure_matrices.RData")
-
-#### Simulate data ####
-data_template <- data.frame(region = "All", years = 1:num_years, logit.est = 0,
-                            var.est = 0, logit.prec = 0, region_num = 0,
-                            survey = NA, mean = NA, lower = NA, upper = NA,
-                            risk = 0)
-for(i in 1:num_prec_settings){
-    for(j in 1:num_par_settings){
-        for(k in 1:num_reps){
-            set.seed(37 * i * j * k)
-            #print(paste(i, j, k))
-            dat <- data_template
-            dat$logit.prec <- unlist(prec_settings[i, ])
-            dat$var.est <- 1 / dat$logit.prec
-            
-            for(l in 1:num_years){
-                if(l %in% conflict_years){
-                  if(!is.na(par_settings$mu_2[j])){
-                    trend <- par_settings$mu_2[j]
-                  }
-                  else{
-                    trend <- triangle[l]
-                  }
-                  trend <-
-                    dat$risk[l] <- trend + 
-                        rnorm(1, mean = 0, sd = 1 / sqrt(par_settings$tau_2[j]))
-                        
-                }
-                else{
-                  if(!is.na(par_settings$mu_1[j])){
-                    trend <- par_settings$mu_1[j]
-                  }
-                  else{
-                    trend <- triangle[l]
-                  }
-                    dat$risk[l] <- trend + 
-                        rnorm(1, mean = 0, sd = 1 / sqrt(par_settings$tau_1[j]))
-                    
-                }
-            }
-            dat$logit.est <- rnorm(num_years, mean = dat$risk,
-                                   sd = sqrt(dat$var.est))
-            
-            save(dat, 
-                 file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/dat_prec_", i, "_par_", j, "_rep_", k))
-        }
-    }
-}
-
-load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Results_W/Fits_proposed/fit_prec_", 1, 
-                               "_par_", 1, "_rep_", 1))
-
-library(INLA)
-inla.version()
-inla.update(testing = TRUE)
 ```
 
-
-run the simulations
+Making and saving the plots.
 ```{r}
-library(SUMMER)
-library(dplyr)
+load("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/Gamma0,00005/full_eval_df")
+make_full_box_plot(full_eval_df, "RMSE", "CT", "Gamma0,00005")
+make_full_box_plot(full_eval_df, "LS", "CT", "Gamma0,00005")
+make_full_box_plot(full_eval_df, "RMSE", "NCT", "Gamma0,00005")
+make_full_box_plot(full_eval_df, "LS", "NCT", "Gamma0,00005")
 
-#### Load data and helper functions ####
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/structure_matrices.RData")
-source("C:/Users/Halvard/Documents/GitHub/Master-project/adaptive_bym2_rgeneric.R")
-source("C:/Users/Halvard/Documents/GitHub/Master-project/bym2_rgeneric.R")
-source("C:/Users/Halvard/Documents/GitHub/Master-project/smoothDirect_extra.R")
+load("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/Gamma0,005/full_eval_df")
+make_full_box_plot(full_eval_df, "RMSE", "CT", "Gamma0,005")
+make_full_box_plot(full_eval_df, "LS", "CT", "Gamma0,005")
+make_full_box_plot(full_eval_df, "RMSE", "NCT", "Gamma0,005")
+make_full_box_plot(full_eval_df, "LS", "NCT", "Gamma0,005")
 
-#### Set simulation parameters ####
-num_reps <- 40 # 2*n
-num_years <- 30
-num_par_settings <- 6
-num_prec_settings <- 3
-
-#### Specify PC prior hyperparameters ####
-pc.u <- 1
-pc.alpha <- 0.01
-pc.u.phi <- 0.5
-pc.alpha.phi <- 2 / 3
-pc.u.theta <- 0.75
-pc.alpha.theta <- 0.75
-
-#### Get SUMMER internals ####
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/dat_prec_1_par_1_rep_1")
-dat_bym2format <- dat %>%
-    mutate(region = years, years = 0, region_num = as.numeric(region))
-amat <- matrix(0, nrow = num_years, ncol = num_years)
-for(i in 1:num_years){
-    if(i < num_years){
-        amat[i, i + 1] <- 1
-        amat[i + 1, i] <- 1
-    }
-}
-colnames(amat) <- 1:num_years
-rownames(amat) <- 1:num_years
-
-smoothed_direct_bym2 <- smoothDirect_extra(data = dat_bym2format, 
-                                           Amat = amat, time.model = NULL,
-                                           year_label = "0", year_range = c(0), 
-                                           is.yearly = FALSE, m = 1, 
-                                           verbose = FALSE)
-
-#### Set up INLA details #### 
-# AGMRF
-adaptive_bym2_model <- 
-    INLA::inla.rgeneric.define(model = inla.rgeneric.adaptive.bym2.model, 
-                               n = num_years, R_1_star = R_1_star, 
-                               R_2_star = R_2_star, gamma_tilde = gamma_tilde, 
-                               eps = eps, U_prec = pc.u, alpha_prec = pc.alpha, 
-                               U_phi = pc.u.phi, alpha_phi = pc.alpha.phi,
-                               U_theta = pc.u.theta, 
-                               alpha_theta = pc.alpha.theta)
-constr <- list(A = matrix(c(rep(0, num_years), rep(1, num_years)), 
-                          nrow = 1, ncol = 2 * num_years), e = 0)
-mod <- logit.est ~ f(region.struct, model = adaptive_bym2_model, 
-                     diagonal = 1e-06, extraconstr = constr, n = 2 * num_years)
-options <- list(dic = TRUE, mlik = TRUE, cpo = TRUE, 
-                openmp.strategy = "default")
-control.inla <- list(strategy = "adaptive", int.strategy = "auto")
-temp <- smoothed_direct_bym2
-
-# BYM2
-bym2_model <- 
-  INLA::inla.rgeneric.define(model = inla.rgeneric.bym2.model, 
-                             n = num_years, Q_star = R_1_star + R_2_star, 
-                             gamma_tilde = gamma_tilde, 
-                             U_prec = pc.u, alpha_prec = pc.alpha, 
-                             U_phi = pc.u.phi, alpha_phi = pc.alpha.phi)
-mod.bym2 <- logit.est ~ f(region.struct, model = bym2_model, 
-                          diagonal = 1e-06, extraconstr = constr, 
-                          n = 2 * num_years)
-
-#### Fit models ####
-# 
-for(i in 1:num_prec_settings){
-    for(j in 1:num_par_settings){
-        for(k in 1:num_reps){
-            set.seed(37 * i * j * k)
-            print(paste(i, j, k))
-            load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/dat_prec_", i, "_par_", j, "_rep_", k))
-            temp$newdata[1:num_years, 
-                          c("logit.est", "var.est", "logit.prec")] <- 
-                dat[, c("logit.est", "var.est", "logit.prec")]
-            fit <- INLA::inla(mod, family = "gaussian", 
-                              control.compute = options, data = temp$newdata, 
-                              control.predictor = list(compute = TRUE), 
-                              control.family = 
-                                  list(hyper = list(prec = 
-                                                        list(initial = log(1), 
-                                                             fixed = TRUE))), 
-                              scale = temp$newdata$logit.prec, 
-                              lincomb = temp$lincombs.fit, 
-                              control.inla = control.inla, verbose = FALSE)
-            save(fit, 
-                 file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Results_W/Fits_proposed/fit_prec_", i, 
-                               "_par_", j, "_rep_", k))
-            
-            fit_bym2 <- INLA::inla(mod.bym2, family = "gaussian", 
-                                   control.compute = options, 
-                                   data = temp$newdata, 
-                                   control.predictor = list(compute = TRUE), 
-                                   control.family = 
-                                     list(hyper = list(prec = 
-                                                         list(initial = log(1), 
-                                                              fixed = TRUE))), 
-                                   scale = temp$newdata$logit.prec, 
-                                   lincomb = temp$lincombs.fit, 
-                                   control.inla = control.inla, verbose = FALSE)
-            
-            # dat_bym2format <- dat %>%
-            #     mutate(region = years, years = 0, 
-            #            region_num = as.numeric(region))
-            # smoothed_direct_fit <- 
-            #     smoothDirect_extra(data = dat_bym2format, 
-            #                        Amat = amat, time.model = NULL,
-            #                        year_label = "0", year_range = c(0), 
-            #                        is.yearly = FALSE, m = 1, 
-            #                        verbose = FALSE)
-            save(fit_bym2, 
-                 file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Results_W/Fits_smoothed_direct/fit_prec_", i, 
-                               "_par_", j, "_rep_", k))
-        }
-    }
-}
+load("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/PC/full_eval_df")
+make_full_box_plot(full_eval_df, "RMSE", "CT", "PC")
+make_full_box_plot(full_eval_df, "LS", "CT", "PC")
+make_full_box_plot(full_eval_df, "RMSE", "NCT", "PC")
+make_full_box_plot(full_eval_df, "LS", "NCT", "PC")
 ```
 
-Process results:
 
-```{r}
-library(dplyr)
-library(INLA)
-library(tidyverse)
 
-#### Set simulation parameters ####
-num_reps <- 40
-num_years <- 30
-num_par_settings <- 6
-num_prec_settings <- 3
-reps <- 1:num_reps #vet ikke om dette stemmer
 
-# NA indicates the usage of the triangle trend
-par_settings <- data.frame(mu_1 = c(rep(-2, num_par_settings - 2), NA, NA),
-                           mu_2 = c(c(-2, -2, -1, -1), NA, NA),
-                           tau_1 = rep(20, num_par_settings),
-                           tau_2 = c(20, 10, 20, 10, 20, 10))
-triangle <- c(rep(-2, 8), 
-              seq(from = -2, to = -0.75, length.out = 5)[2:4], 
-              -0.75, 
-              seq(from = -2, to = -0.75, length.out = 5)[4:2], 
-              rep(-2, 15))
-prec_settings <- c(150, 300, 75)
-trend_settings <- c("Trend: Constant", "Trend: Constant", "Trend: Level Change",
-                    "Trend: Level Change", "Trend: Triangle", "Trend: Triangle")
-re_settings <- c("Random Effect: Equal Precisions", 
-                 "Random Effect: Unequal Precisions",
-                 "Random Effect: Equal Precisions", 
-                 "Random Effect: Unequal Precisions",
-                 "Random Effect: Equal Precisions", 
-                 "Random Effect: Unequal Precisions")
-par_settings_descrip <- 
-  c("Trend: Constant; Random Effect: Equal Precisions",
-    "Trend: Constant; Random Effect: Unequal Precisions",
-    "Trend: Level Change; Random Effect: Equal Precisions",
-    "Trend: Level Change; Random Effect: Unequal Precisions",
-    "Trend: Triangle; Random Effect: Equal Precisions",
-    "Trend: Triangle; Random Effect: Unequal Precisions")
-
-results <- data.frame(rep = NA, prec_setting = NA, par_setting = NA, 
-                      trend_settings = NA, re_settings = NA, model = NA,
-                      rmse_logit_risk = NA, rmse_logit_obs = NA, rmse_risk = NA, 
-                      rmse_obs = NA, cpo = NA, dic = NA)
-
-for(i in 1:num_prec_settings){
-    for(j in 1:num_par_settings){
-        results_proposed <- data.frame(rep = 1:num_reps, prec_setting = i, 
-                                       par_setting = par_settings_descrip[j], 
-                                       trend_settings = trend_settings[j], 
-                                       re_settings = re_settings[j],
-                                       model = "Proposed",
-                                       rmse_logit_risk = 0, 
-                                       rmse_logit_obs = 0,
-                                       rmse_risk = 0, 
-                                       rmse_obs = 0, cpo = 0, dic = 0)
-        results_smoothed_direct <- 
-          data.frame(rep = 1:num_reps, 
-                     prec_setting = i, 
-                     par_setting = par_settings_descrip[j], 
-                     trend_settings = trend_settings[j], 
-                     re_settings = re_settings[j],
-                     model = "Smoothed Direct",
-                     rmse_logit_risk = 0, 
-                     rmse_logit_obs = 0,
-                     rmse_risk = 0, 
-                     rmse_obs = 0, cpo = 0, dic = 0)
-        for(k in 1:num_reps){
-            load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Results_W/Fits_proposed/fit_prec_", i, "_par_", j, 
-                        "_rep_", k))
-            load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Results_W/Fits_smoothed_direct/fit_prec_", i, "_par_", 
-                        j, "_rep_", k))
-            load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Data_W/dat_prec_", i, "_par_", j, "_rep_", k))
-            
-            results_proposed$rmse_logit_risk[k] <- 
-                sqrt(mean((fit$summary.fitted.values$mean[1:num_years] - 
-                               dat$risk) ^ 2))
-            results_smoothed_direct$rmse_logit_risk[k] <- 
-                sqrt(mean((fit_bym2$summary.fitted.values$mean[1:num_years] - 
-                               dat$risk) ^ 2))
-            results_proposed$rmse_logit_obs[k] <- 
-                sqrt(mean((fit$summary.fitted.values$mean[1:num_years] - 
-                               dat$logit.est) ^ 2))
-            results_smoothed_direct$rmse_logit_obs[k] <- 
-                sqrt(mean((fit_bym2$summary.fitted.values$mean[1:num_years] - 
-                               dat$logit.est) ^ 2))
-            
-            results_proposed$cpo[k] <- -mean(log(fit$cpo$cpo[1:num_years]))
-            results_smoothed_direct$cpo[k] <- 
-                -mean(log(fit_bym2$cpo$cpo[1:num_years]))
-            
-            results_proposed$dic[k] <- fit$dic$dic
-            results_smoothed_direct$dic[k] <- fit_bym2$dic$dic
-            
-           
-           
-        }
-        print(paste0("mu_1 = ", par_settings$mu_1[j], 
-                     ", mu_2 = ", par_settings$mu_2[j], 
-                     ", tau_1 = ",  par_settings$tau_1[j], 
-                     ", tau_2 = ",  par_settings$tau_2[j]))
-        print("Proposed:")
-        print(colMeans(results_proposed[reps, 7:12]))
-        print("Smoothed Direct:")
-        print(colMeans(results_smoothed_direct[reps, 7:12]))
-        
-        results <- rbind(results, 
-                         results_proposed[reps,], 
-                         results_smoothed_direct[reps,])
-    }
-}
-
-results <- results[-1, ]
-save(results, file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Results_W/model_comp"))
-```
-
-```{r}
-library(dplyr)
-library(tidyverse)
-
-#### Load in results ####
-load(file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Results_W/model_comp"))
-
-#### Plot results ####
-results <- results %>% 
-  mutate(prec_setting_descrip = factor(prec_setting, 
-                                       levels = c("3", "1", "2")))
-levels(results$prec_setting_descrip) <- c("V: 1 / 75", 
-                                          "V: 1 / 150", 
-                                          "V: 1 / 300")
-
-results %>% group_by(prec_setting, par_setting, model) %>% 
-  summarise(rmse_logit_risk = mean(rmse_logit_risk),
-            rmse_logit_obs = mean(rmse_logit_obs),
-            rmse_risk = mean(rmse_risk),
-            rmse_obs = mean(rmse_obs),
-            cpo = mean(cpo),
-            dic = mean(dic)) %>% as.data.frame()
-
-results %>% filter(re_settings == "Random Effect: Equal Precisions") %>%
-  ggplot(aes(x = model, y = rmse_logit_risk)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  xlab("Model") + ylab("RMSE") + theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/rmse_logit_risk_plots_equal.pdf", 
-       width = 10, height = 7)
-results %>% filter(re_settings == "Random Effect: Equal Precisions") %>%
-  ggplot(aes(x = model, y = cpo)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  xlab("Model") + ylab("LS") + theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/cpo_plots_equal.pdf", width = 10, height = 7)
-results %>%  filter(re_settings == "Random Effect: Equal Precisions") %>%
-  ggplot(aes(x = model, y = dic)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  xlab("Model") + ylab("DIC") + theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/dic_plots_equal.pdf", width = 10, height = 7)
-
-results %>% filter(re_settings == "Random Effect: Unequal Precisions") %>%
-  ggplot(aes(x = model, y = rmse_logit_risk)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  xlab("Model") + ylab("RMSE") + theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/rmse_logit_risk_plots_unequal.pdf", 
-       width = 10, height = 7)
-results %>% filter(re_settings == "Random Effect: Unequal Precisions") %>%
-  ggplot(aes(x = model, y = cpo)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  xlab("Model") + ylab("LS") + theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/cpo_plots_unequal.pdf", width = 10, height = 7)
-results %>%  filter(re_settings == "Random Effect: Unequal Precisions") %>%
-  ggplot(aes(x = model, y = dic)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  xlab("Model") + ylab("DIC") + theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/dic_plots_unequal.pdf", width = 10, height = 7)
-
-#### Plot results as differences ####
-results_wider <- results %>% select(-c(rmse_risk, rmse_obs, rmse_logit_obs)) %>%
-  pivot_wider(names_from = model, values_from = c(rmse_logit_risk, cpo, dic))
-
-results_wider %>% filter(re_settings == "Random Effect: Equal Precisions") %>%
-  ggplot(aes(y = `rmse_logit_risk_Smoothed Direct` - 
-               `rmse_logit_risk_Proposed`)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  ylab("RMSE Difference") + 
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) + 
-  theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/rmse_logit_risk_plots_equal_diff.pdf", 
-       width = 10, height = 7)
-results_wider %>% filter(re_settings == "Random Effect: Equal Precisions") %>%
-  ggplot(aes(y = `cpo_Smoothed Direct` - `cpo_Proposed`)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  ylab("LS Difference") + 
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) + 
-  theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/cpo_plots_equal_diff.pdf", width = 10, height = 7)
-results_wider %>%  filter(re_settings == "Random Effect: Equal Precisions") %>%
-  ggplot(aes(y = `dic_Smoothed Direct` - `dic_Proposed`)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  ylab("DIC Difference") + 
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) + 
-  theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/dic_plots_equal_diff.pdf", width = 10, height = 7)
-
-results_wider %>% filter(re_settings == "Random Effect: Unequal Precisions") %>%
-  ggplot(aes(y = `rmse_logit_risk_Smoothed Direct` -
-               `rmse_logit_risk_Proposed`)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  ylab("RMSE Difference") + 
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) + 
-  theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/rmse_logit_risk_plots_unequal_diff.pdf", 
-       width = 10, height = 7)
-results_wider %>% filter(re_settings == "Random Effect: Unequal Precisions") %>%
-  ggplot(aes(y = `cpo_Smoothed Direct` - `cpo_Proposed`)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  ylab("LS Difference") + 
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) + 
-  theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/cpo_plots_unequal_diff.pdf", width = 10, height = 7)
-results_wider %>%  
-  filter(re_settings == "Random Effect: Unequal Precisions") %>%
-  ggplot(aes(y = `dic_Smoothed Direct` - `dic_Proposed`)) + geom_boxplot() + 
-  facet_wrap(~ trend_settings + prec_setting_descrip, ncol = 3) +
-  ylab("DIC Difference") + 
-  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank()) + 
-  theme_gray(base_size = 16)
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/dic_plots_unequal_diff.pdf", width = 10, height = 7)
-
-#### Trend plots #### 
-trend_dat <- data.frame(time = rep(1:30, 3), mu = NA, 
-                        trend_name = 
-                          rep(c("Constant", "Level Change", "Triangle"),
-                              each = 30))
-trend_dat$mu[1:30] <- -2
-trend_dat$mu[31:60] <- -2
-trend_dat$mu[(30 + 9):(30 + 15)] <- -1
-trend_dat$mu[61:90] <- c(rep(-2, 8), 
-                         seq(from = -2, to = -0.75, length.out = 5)[2:4], 
-                         -0.75, seq(from = -2, to = -0.75, length.out = 5)[4:2], 
-                         rep(-2, 15))
-
-trend_dat %>% ggplot(aes(x = time, y = mu)) + geom_line() +
-  facet_wrap(vars(trend_name), ncol = 3) + ylab(expression(mu)) + xlab("Time") 
-ggsave(filename = "C:/Users/Halvard/Documents/GitHub/Master-project/Plots_W/trends.pdf", width = 7, height = 3)
-```
 
 
 

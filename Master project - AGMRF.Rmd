@@ -873,7 +873,7 @@ sim_dataframe_Wakefield <- function(n, mu, V, tau1 = 20, tau2 = 20, seed = 64) {
 }
 ```
 
-Now we simulate the data for the eighteen different cases with $n = 20$ realizations of each case.
+Now we simulate the data for the eighteen different cases with $n = 100$ realizations of each case.
 ```{r}
 #for constant tau (CT)
 
@@ -942,19 +942,6 @@ myboxplot2 <- function(df, mean, V){
     scale_fill_manual(values = c("RW1" = "skyblue", "ARW1" = "orange"))
   return(eval_plot)
 }
-
-
-#myboxplot2 <- function(data, mean, V) {
-#  df <- data.frame(d = data[,1])
-#  BPlot <- ggplot(df, aes(y = d)) +
-#      geom_boxplot(fill = "slateblue", alpha = 0.2) +
- #     ggtitle(paste("Mu: ", mean, ", V: ", V))+
-  #    ylab("") + xlab("") +
-   #  theme(plot.title = element_text(size = 16))
-  #return(BPlot)
-#}
-#testing the boxplot2
-#myboxplot2(data_w_delta_150_NS["X1"], "delta", "1/150")
 
 mod_eval_W <- function(df, mean = "", V = "") {
   df <- df[[1]] #just for now so the code still works
@@ -1100,7 +1087,8 @@ Another similar situation is when the mean is a harmonious function, say some si
 N <- 30
 n <- 30
 V <- 1/1000 #observational variance
-tau <- 100 #latent precision in the iid noise
+tau1 <- 20 #latent precision in the iid noise
+tau2 <- 10 
 o <- 1 # the offset for points 9-15
 
 t <- 1:N
@@ -1112,24 +1100,38 @@ df_mean_sine <- data.frame(matrix(c(mean_sine,  mean_sine_offset), ncol = 2))
 colnames(df_mean_sine) <- c("Non-shocked", "Shocked")
 plot_realizations(df_mean_sine, "Mean for shocked and non-shocked sine data")
 
-sim_dataframe_sine <- function(n, mu, V, tau, o, seed = 64) {
+sim_dataframe_sine <- function(n, mu, V, tau1, tau2, o, seed = 64) {
   set.seed(seed)
-  df <- data.frame(matrix(0, nrow = length(mu), ncol = n))
+  df_y <- data.frame(matrix(0, nrow = length(mu), ncol = n))
+  df_eta <- data.frame(matrix(0, nrow = length(mu), ncol = n))
   for (i in 1:n) {
-    df[, i] <- sim_data_Wakefield(mu, V, tau1 = tau, tau2 = tau) #the function from wakefield above, still works well here
-    df[9:15, i] <- df[9:15, i] + o #adding the offset for 9-15
+    sim_data <- sim_data_Wakefield(mu, V, tau1 = tau1, tau2 = tau2)
+    df_y[, i] <- sim_data[[1]] #gets the y-value
+    df_y[9:15, i] <- df_y[9:15, i] + o #adding the offset for 9-15
+    df_eta[, i] <- sim_data[[2]]
+    df_eta[9:15, i] <- df_eta[9:15, i] + o
   }
-  df$t <- 1:length(mu)
-  df$us <- 1:length(mu)
-  return(df)
+  df_y$t <- 1:length(mu)
+  df_y$us <- 1:length(mu)
+  return(list(df_y, df_eta))
 }
+  #data_W <- list(df_y, df_eta)
+  #save(data_W, file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Data_W/data_W_", mean_str, "_", V_str, "_", T_str))
 
-df_sine_S <- sim_dataframe_sine(n, mean_sine, V, tau, o)
+# sim_data_Wakefield <- function(mu, V, tau1 = 20, tau2 = 20) {
+#   eta <- mu + c(rnorm(8, sd = sqrt(1/tau1)), rnorm(7, sd = sqrt(1/tau2)), 
+#                 rnorm(15, sd = sqrt(1/tau1)))
+#   y <- rnorm(length(mu), mean = eta, sd = sqrt(V))
+#   return(list(y, eta)) #[[1]] gives y and [[2]] gives eta
+# }
 
-df_sine_NS <- sim_dataframe_sine(n, mean_sine, V, tau, 0)
+df_sine_S <- sim_dataframe_sine(n, mean_sine, V, tau1, tau2, o)[[1]]
+
+df_sine_NS <- sim_dataframe_sine(n, mean_sine, V, tau1, tau2, 0)[[1]]
 
 plot_realizations(df_sine_NS[, 1:5], "Five realisations witout shock",, legend = FALSE)
 plot_realizations(df_sine_S[, 1:5], "Five realisations with shock at 9-15", legend =FALSE)
+
 ```
 Now we have the data, lets perform the model evaluation with RMSE and LS.
 

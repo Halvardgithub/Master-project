@@ -71,7 +71,7 @@ death_rate_figure <- annotate_figure(plot_20_60, top = "Death rates for ages 20-
 death_rate_figure
 
 #save the figure
-ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/death_rate_fig.pdf", plot = death_rate_figure)
+#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/death_rate_fig.pdf", plot = death_rate_figure)
 ```
 
 # Models 
@@ -238,14 +238,14 @@ DR20_24$deaths <- as.integer(DR20_24$deaths)
 
 
 prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
-family <- "nbinomial"
+family <- "poisson"
 
 if(prior_str == "Gamma0,00005"){
-  formula_RW1 <- deaths ~ f(time, model = "rw1")  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1")#  + f(us, model = "iid")
 } else if(prior_str == "Gamma0,005"){
-  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))#  + f(us, model = "iid")
 } else{
-  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))#  + f(us, model = "iid")
 }
 
 # res_RW1 <- inla(formula_RW1, family = "gaussian", data = DR20_24, 
@@ -271,7 +271,7 @@ ARW1 <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model,
                       N = N, conflict_years = S, prior_str = prior_str)
 
 formula_ARW1 <- deaths ~ f(time, model = ARW1, extraconstr = 
-                  list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
+                  list(A = matrix(1, nrow = 1, ncol = N), e = 0))#  + f(us, model = "iid")
 
 # res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = DR20_24, 
 #                     control.compute = list(cpo = TRUE), 
@@ -294,7 +294,7 @@ ARW1_3tau <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model_3tau,
                 N = N, conflict_years1 = S_flu, conflict_years2 = S_WW2, prior_str = prior_str)
 
 formula_ARW1_3tau <- deaths ~ f(time, model = ARW1_3tau, extraconstr = 
-                    list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
+                    list(A = matrix(1, nrow = 1, ncol = N), e = 0))#  + f(us, model = "iid")
 
 # res_ARW1_3tau <- inla(formula_ARW1_3tau, family = "gaussian", data = DR20_24, 
 #                     control.compute = list(cpo = TRUE), 
