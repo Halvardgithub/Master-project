@@ -61,8 +61,9 @@ mod_eval_W <- function(df, mean = "", V = "", P, tau = "") {
      #save(res_RW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/RW1/fit_W_", mean, "_", P, "_", tau, "_", i))
      #save(res_ARW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/ARW1/fit_W_", mean, "_", P, "_", tau, "_", i))
   }
-  #save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results_W/eval_df_", mean, "_", P, "_", tau))
-  save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", prior_str, "/eval_df_", mean, "_", P, "_", tau))
+  
+  save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results2/eval_df_", mean, "_", P, "_", tau))
+  #save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", prior_str, "/eval_df_", mean, "_", P, "_", tau))
   
   #plot_RMSE <- myboxplot2(eval_df[, c("RMSE_RW1", "RMSE_ARW1")], mean, V)
   #plot_LS <- myboxplot2(eval_df[, c("LS_RW1", "LS_ARW1")], mean, V)
@@ -116,7 +117,7 @@ taus <- c("CT", "NCT")
 for(m in 1:length(means)){
   for(p in 1:length(precs)){
     for(t in 1:length(taus)){
-      load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results_W/eval_df_", means[m], "_", precs[p], "_", taus[t]))
+      load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results2/eval_df_", means[m], "_", precs[p], "_", taus[t]))
       index_str <- paste0("_", means[m], "_", precs[p], "_", taus[t])
       colnames(eval_df) <- c(paste0("RMSE_RW1", index_str), paste0("LS_RW1", index_str), paste0("RMSE_ARW1", index_str), paste0("LS_ARW1", index_str))
       if(m == 1 & p == 1 & t == 1){
@@ -128,7 +129,7 @@ for(m in 1:length(means)){
     }
   }
 }
-save(full_eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str,"/Results_W/full_eval_df"))
+save(full_eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str,"/Results2/full_eval_df"))
 ```
 
 Now we need to summarise this information in some plots, and as in the article we will use boxplots for the nine subcases which all have either constant tau or non-constant tau.
@@ -209,41 +210,6 @@ make_full_box_plot(full_eval_df, "RMSE", "NCT", "PC")
 make_full_box_plot(full_eval_df, "LS", "NCT", "PC")
 ```
 
-
-Plotting the plots for version 1
-```{r}
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v1/plot_eval_CT_W_RMSE")
-plot_eval_CT_W_RMSE
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v1/plot_eval_CT_W_LS")
-plot_eval_CT_W_LS
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v1/plot_eval_NCT_W_RMSE")
-plot_eval_NCT_W_RMSE
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v1/plot_eval_NCT_W_LS")
-plot_eval_NCT_W_LS
-```
-
-From v1 to v2 I now calculate the RMSE on the latent layer without the iid effect instead of on the observation layer.
-
-Plotting the plots for version 2
-```{r}
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v2/plot_eval_CT_W_RMSE")
-plot_eval_CT_W_RMSE
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v2/plot_eval_CT_W_LS")
-plot_eval_CT_W_LS
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v2/plot_eval_NCT_W_RMSE")
-plot_eval_NCT_W_RMSE
-
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Plot_W_n20_v2/plot_eval_NCT_W_LS")
-plot_eval_NCT_W_LS
-```
-
-
-Min RMSE er mye høyere, så må sjekke hvordan de regner ut RMSE. Virker også som om min LS ikke viser at ARW1 er bedre enn RW1, så kanskje på grunn av priorene for parameterene. LS er også mye høyere enn deres av en eller annen grunn. Virker som om de bruker RMSE i forhold til det latente laget, så isteden for observasjonsdataene bruker vi det simulerte meanet, og de sammenligner med res\$summary.fitted.values\$mean[1:N], which I think might be the sum of the structured and unstructued random effect, while I also include the iid random effect. Furthermore, they fit $2N$ values in INLA and only use the first half in their calculations of LS and RMSE, and I am not quite sure which part it is.
 
 Man kan tydeligvis ikke ha variabelnavn med understrekk, da bare klikker INLA av en eller annen grunn.
 
@@ -388,7 +354,7 @@ Define the model and the inla formulas used in the modelling.
 ```{r}
 N <- 30
 conf_years <- c(9, 10, 11, 12, 13, 14, 15)
-prior_str <- "Gamma0,005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
 
 if(prior_str == "Gamma0,00005"){
   formula_RW1 <- y ~ f(time, model = "rw1")  + f(us, model = "iid")

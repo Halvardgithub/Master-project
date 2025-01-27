@@ -373,9 +373,9 @@ ss <- tableGrob(data)
 result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob("With a Gamma(1, 0.005) prior and a Poisson likelihood", gp = (gpar(fontsize = 15))))
 
 
-ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
+#ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
 
-ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
+#ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
 
 
 #INLA::inla.doc("poisson likelihood")
