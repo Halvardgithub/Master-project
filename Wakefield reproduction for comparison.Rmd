@@ -22,10 +22,10 @@ if(prior_str == "Gamma0,00005"){
   formula_RW1 <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
 }
 
-R_star_list_W <- Scaled_structure_matrices_for_ARW1(N, conf_years)
-ARW1_model_W <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
-                        N = N, R_star_list = R_star_list_W, prior_str = prior_str)
-formula_ARW1_W <- y ~ f(time, model = ARW1_model_W,
+
+ARW1_model <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model2, N = N, conflict_years = conf_years, prior_str = prior_str)
+
+formula_ARW1_W <- y ~ f(time, model = ARW1_model,
                 extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0)) +
                 f(us, model = "iid")
 
