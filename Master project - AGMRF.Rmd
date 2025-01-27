@@ -1135,6 +1135,41 @@ plot_realizations(df_sine_S[, 1:5], "Five realisations with shock at 9-15", lege
 ```
 Now we have the data, lets perform the model evaluation with RMSE and LS.
 
+Making the plot for the means.
+```{r}
+library(grid)
+
+data_w_harm_300_CT <- sim_dataframe_sine(100, mean_sine, 1/300, 20, 20, 0)
+data_w_sHarm_300_CT <- sim_dataframe_sine(100, mean_sine, 1/300, 20, 20, 1)
+
+#visualizing the means
+df <- data.frame(matrix(c(mean_flat, data_w_flat_300_CT[[1]][, 1], mean_delta, data_w_delta_300_CT[[1]][, 2], mean_triangle, data_w_triangle_300_CT[[1]][, 3], 1:N, mean_sine, data_w_harm_300_CT[[1]][, 4], mean_sine_offset, data_w_sHarm_300_CT[[1]][, 5]), ncol = 11, nrow = N))
+
+ymax <- max(df[, 1:6])
+ymin <- min(df[, 1:6])
+
+ymax_sine <- max(df[, 8:11])
+ymin_sine <- min(df[, 8:11])
+
+plot_flat <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X1), color = "black") + geom_point(aes(y = X2), color = "red") + labs(title="Flat", y="y", x = "t") + ylim(ymin, ymax)
+plot_delta <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X3), color = "black") + geom_point(aes(y = X4), color = "red") +
+  labs(title="Delta", x="t", y = "") + ylim(ymin, ymax)
+plot_triangle <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X5), color = "black") + geom_point(aes(y = X6), color = "red") + labs(title="Triangle", x = "", y = "t") + ylim(ymin, ymax)
+plot_sine <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X8), color = "black") + geom_point(aes(y = X9), color = "red") + labs(title="Sine", x = "t", y = "y") + ylim(ymin_sine, ymax_sine)
+plot_sine_offset <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X10), color = "black") + geom_point(aes(y = X11), color = "red") + labs(title="Offset sine", x = "t", y = "") + ylim(ymin_sine, ymax_sine)
+
+
+mean_plot <- ggarrange(plot_flat, plot_delta, plot_triangle, plot_sine, plot_sine_offset, nrow = 2, ncol = 3)
+
+mean_figure <- annotate_figure(mean_plot, top = textGrob("The mean structures and a realisation", gp = (gpar(fontsize = 15))))
+
+#save the figure
+ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/mean_plot.pdf", plot = mean_figure, height = 8, width = 10, units = "in")
+
+
+```
+
+
 ```{r, eval=FALSE}
 #model evaluation
 

@@ -39,6 +39,7 @@ library(ggplot2)
 library(ggpubr)
 library(INLA)
 library(gridExtra)
+library(grid)
 
 N <- 71
 S_flu <- c(19, 20) # corresponds to 18, 19, the Spanish flu
@@ -64,14 +65,14 @@ plot_60 <- ggplot(DR60_64, aes(Year, death_rate, color = factor(col_map))) +
           labs(x = "Year", y = "Death rate") +
           theme(legend.position = "none")
 
-plot_20_60 <- ggarrange(plot_20, plot_60, ncol = 2)
+plot_20_60 <- ggarrange(plot_20, plot_60, ncol = 1)
 
-death_rate_figure <- annotate_figure(plot_20_60, top = "Death rates for ages 20-24(left) and 60-64(right)")
+death_rate_figure <- annotate_figure(plot_20_60, top = textGrob("Death rates for ages 20-24(top) and 60-64(bottom)", gp = (gpar(fontsize = 15))))
 
 death_rate_figure
 
 #save the figure
-#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/death_rate_fig.pdf", plot = death_rate_figure)
+ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/death_rate_fig.pdf", plot = death_rate_figure, height = 8, width = 8, units = "in")
 ```
 
 # Models 
