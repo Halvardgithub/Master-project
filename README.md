@@ -1,2 +1,2 @@
 # Master-project
-Code and figures for my master project about adaptive Gaussian Markov random fields for data with known shocks. 
+The main code is contained in three files, Master project - AGMRF.Rmd, Wakefield reproduction for comparison.Rmd and Application for Norwegian death rates.Rmd. The simulation study uses both Master project - AGMRF.Rmd and Wakefield reproduction for comparison.Rmd while the applied case with Norwegian death rates is contained in Norwegian death rates.Rmd, as well as using some code and fucntions from the first two files. A lot of the code is still a bit messy, but it will reproduce the results presented in my report.
