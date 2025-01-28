@@ -1230,27 +1230,6 @@ annotate_figure(plot_sine_S,
 ```
 
 
-check:
-maybe weird axis on line 604, definitely weird legend labels, also at 609
-Check yaxis for boxplots for the model eval of Gaussian data
-
-inla.doc("rw1") - all info om RW1, for eksempel prior og initial values
-inla.scale.model - optional argument to scale or not scale a latent effect
-NB: INLA klikker hvis man bruker funksjoner inne i den, for eksmepel geometric_variance, ellers må de defineres det inne potensielt?
-
-To do:
-Write about INLA - not started
-Use set.seed() to make results reproducible - continuous need for this
-  dont need to set the seed for INLA, should be deterministic. 
-
-Briefly describe the methods used in the overleaf, both for data and models.
-
-Sim-studie:
-Har undersøkt en RW1 med Gaussian offset for noen datapunkter.
-Reprodusere Wakefield: 3 ulike trends og tre ulike varianser, pluss forskjell i conf og non-conf tau eller ikke, så 18 scenarior og sjekke LS og RMSE.
-Andrea foreslo også harmonisk med noise pluss offset.
-
-
 #Test data
 ```{r}
 df <- data_w_flat_300_NCT[[1]]
@@ -1465,25 +1444,6 @@ abline(0, 1)
 ```
 Here we see that they are clearly quite different, both for mean and standard deviation. This means that the ARW1 model does not automatically satisfy the sum-to-zero constraint, and that we need to add it, so what does mean = numeric(0) do?
 
-Check:
-Does the AR1 Rue defines in the article perform the exact same as the predefined AR1?
-Make the gitignore stuff so I can push again and ignore all the filetypes with insane numbers, i.e. fits and data etc.
-The one with the method was pretty much as quick as handing in the matrices before hand, so I guess making and scaling the Q is a small part of the total work amount, atleast for a relatively small model like this.
-Write about problem with using certain functions, like ginv, and that we instead need to use INLA:::inla.ginv for the model to work at all. Something with enviroments and R -> C and stuff.
-
-Finding data: SSB only has yearly deathrates from 1974, or for five year periods from 1876, couldent find the link you sent.
-
-Question:
-FInd data?
-WHat does mean 0 do?
-Should the iid term also be sum-to-zero constrained? I guess so
-
-Sende mail digitalt 2/3 januar
-Sende RW1 rgeneric kode
-
-So, it is not necessary to enforce sum-to-zero constraints for iid models in INla, as they are full rank. Needs to pe enforced for all RW1 and ARW1 latent models. The scope in INLA goes through R and C and thus it fails for certain variableusages or function calls which are not implemented in INLA.
-
-
 
 #RW1 greier
 ```{r}
@@ -1552,78 +1512,126 @@ plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd,
 abline(0, 1)
 ```
 
-#RW1 med definert log.const
+
+# Error testing in INLA - mistakes to avoid
+
+Man kan tydeligvis ikke ha variabelnavn med understrekk, da bare klikker INLA av en eller annen grunn.
+
 
 ```{r}
-inla.rgeneric.RW1.model3 = function(
-  cmd = c("graph", "Q", "mu", "initial", "log.norm.const","log.prior", "quit"),
-  theta = NULL)
-{
-  #Input:
-  #N is the number of timepoints
-  
-  envir = parent.env(environment())
-  
-  interpret_theta <- function() {return(list(tau = exp(theta[1L])))}
-  
-  graph <- function() {return(Q())}
-  
-  Q <- function() {
-    R <- toeplitz(c(2, -1, rep(0, N - 2)))# 2 on diag and -1 on firstdiags
-    R[1, 1] <- R[N, N] <- 1 # 1 for first and last diag element
-    gv <- exp(1 / N * sum(log(diag(INLA:::inla.ginv(R))))) #the geometric variance
-    R_star <- gv * R 
-    
-    p <- interpret_theta()
-    Q <- p$tau * R_star
-    return(inla.as.sparse(Q))
-  }
-  
-  mu <- function() {return(numeric(0))}
-  
-  initial <- function() {return(4)}#default for precisions: initial = 4
-  
-  log.norm.const = function() {
-    p = interpret.theta()
-    val = (N-1) * (- 0.5 * log(2*pi) + 0.5*log(p$tau))
-    return (val)
-  }
-  
-  log.prior <- function() {#default: shape = 1, rate = 0.00005 for tau
-    p <- interpret_theta()
-    prior <- dgamma(p$tau, shape = 1, rate = 0.00005, log = TRUE) + log(p$tau)
-    return(prior)
-  }
-  
-  quit <- function() {return(invisible())}
-  
-  #to ensure theta is defined
-  if (!length(theta)) theta = initial()
-  
-  vals <- do.call(match.arg(cmd), args = list())
-  return(vals)
+#some testing
+df <- data_w_flat_300_NCT[[1]]
+test_data <- df[, c(1, n + 1, n + 2)] #gets the i-th realization + time
+colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
+P <- 75
+
+formula_RW1 <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
+res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                scale = P)
+
+test_function <- function(formula, df, Prec) {
+  print(Prec)
+  res_RW1 <- inla(formula, family = "gaussian", data = df, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                scale = Prec)
+  return(res_RW1)
 }
+res1 <- test_function(formula_RW1, test_data, 75)
 
-N <- 30 #is defined further up as well
-RW1_model3 <- inla.rgeneric.define(inla.rgeneric.RW1.model3, N = N)
+test_function2 <- function(df, Prec) {
+  formula_RW1_2 <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
+  res_RW1 <- inla(formula_RW1_2, family = "gaussian", data = df, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                  scale = Prec)
+  return(res_RW1)
+}
+res2 <- test_function2(test_data, 75)
 
-formula_RW1_I <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
-formula_RW1_M <- y ~ f(time, model = RW1_model3, extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0))  + f(us, model = "iid")
+test_function3 <- function(formula, df, Prec) {
+  res_RW1 <- inla(formula, family = "gaussian", data = df, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = Prec, fixed = TRUE))))
+  return(res_RW1)
+}
+res3 <- test_function3(formula_RW1, test_data, 3)
+summary(res3)
 
-res_RW1_I <- inla(formula_RW1_I, family = "gaussian", data = test_data)
-                     
-#control.compute = list(cpo = TRUE),control.family = list(hyper = list(prec = list(initial = log(P), fixed = TRUE))))
-res_RW1_M <- inla(formula_RW1_M, family = "gaussian", data = test_data)
+formula_RW1 <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
+inla.doc("rw1")
 
-#plots to compare the model output
-plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean, 
-     main = "Comparison of the mean", xlab = "Manual RW1", ylab = "INlA's RW1")
-abline(0, 1)
-plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd, 
-     main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
-abline(0, 1)
+P_inv = 75
+res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                scale = P_inv)
+summary(res_RW1)
+res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
+                     control.compute = list(cpo = TRUE),
+                     control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                 scale = P_inv)
+
+res_ARW1$summary.random$time
+res_ARW1$summary.fitted.values$mean- res_ARW1$summary.random$us$mean
+
+plotting_df <- data.frame(matrix(c(res_RW1$summary.fitted.values$mean, res_ARW1$summary.fitted.values$mean, df[, i]), ncol = 3, nrow = N))
+colnames(plotting_df) <- c("RW1", "ARW1", "Data")
+plot_realizations(plotting_df, "Comparison for Wakefield with flat mean")
+
+df <- data_w_delta_300_NCT[[1]]
+i <- 1
+
+test_data <- df[, c(i, n + 1, n + 2)] #gets the i-th realization + time
+colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
+
+res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                scale = 300)
+res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
+                     control.compute = list(cpo = TRUE),
+                     control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                 scale = 300)
+res_ARW1$summary.random$time
+
+plotting_df <- data.frame(matrix(c(res_RW1$summary.fitted.values$mean, res_ARW1$summary.fitted.values$mean, df[, i]), ncol = 3, nrow = N))
+colnames(plotting_df) <- c("RW1", "ARW1", "Data")
+plot_realizations(plotting_df, "Comparison for Wakefield with delta mean")
+
+df <- data_w_triangle_300_NCT[[1]]
+i <- 1
+
+test_data <- df[, c(i, n + 1, n + 2)] #gets the i-th realization + time
+colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
+
+res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
+                    control.compute = list(cpo = TRUE), 
+                    control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                scale = 300)
+res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
+                     control.compute = list(cpo = TRUE),
+                     control.family = list(hyper = list(prec = 
+                                    list(initial = log(1), fixed = TRUE))),
+                 scale = 1)
+
+plotting_df <- data.frame(matrix(c(res_RW1$summary.fitted.values$mean, res_ARW1$summary.fitted.values$"0.025quant", res_ARW1$summary.fitted.values$"0.975quant", res_ARW1$summary.fitted.values$mean, df[, i]), ncol = 5, nrow = N))
+colnames(plotting_df) <- c("RW1", "0.025", "0.975", "ARW1", "Data")
+plot_realizations(plotting_df, "Comparison for Wakefield with triangle mean")
 
 ```
+
 
 
 
