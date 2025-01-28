@@ -425,6 +425,14 @@ Above is the RW1 rgeneric where Q is defined internally and we only pass $N$ as 
 
 The RW1_model above is now a custom latent effect which can be included in INLA formulas to define models. However, it is only defined for $N=50$, and we need to define separate ones for other $N$.Now, lets check if it works as intended on some data from earlier. Then we need to define the INLA formula where we add a constraint to enforce a sum to zero constraint as the model includes an intercept.
 ```{r}
+exp_func <- function(x){
+  return(exp(x))
+}
+set.seed(15)
+t <- 1:N
+y <- sin(t/N*2) + rnorm(N, sd = 0.2)
+test_data <- as.data.frame(list(y = y, time = t, us = 1:N))
+
 N <- 50 #is defined further up as well
 RW1_model2 <- inla.rgeneric.define(inla.rgeneric.RW1.model2, N = N)
 
@@ -432,52 +440,36 @@ RW1_model2 <- inla.rgeneric.define(inla.rgeneric.RW1.model2, N = N)
 formula_M <- y ~ f(time, model = RW1_model2, 
                 extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0)) +
   f(us, model = "iid")
-res_M <- inla(formula_M, family = "gaussian", data = NSG_data)
+res_M <- inla(formula_M, family = "gaussian", data = test_data)
 
 #The standard RW1 model from INLA
-formula_I <- y ~ f(time, model = "rw1") + f(us, model = "iid")
-res_I <- inla(formula_I, family = "gaussian", data = NSG_data)
+formula_I <- y ~ f(time, model = "rw1", scale.model = T) + f(us, model = "iid")
+res_I <- inla(formula_I, family = "gaussian", data = test_data)
 
 summary(res_M)
 summary(res_I)
 
+inla.qmarginal(c(0.025, 0.5, 0.975), inla.tmarginal(exp_func, res_M$marginals.hyperpar$`Theta1 for time`))
+
 #plots to compare the model output
-plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean, 
-     main = "Comparison of the mean", xlab = "Manual RW1", ylab = "INlA's RW1")
-abline(0, 1)
-plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd, 
-     main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
-abline(0, 1)
+mean_plot <- ggplot() +
+  geom_point(aes(x = res_M$summary.fitted.values$mean, 
+                 y = res_I$summary.fitted.values$mean)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "blue") +
+  labs(title = "Comparison of the Mean", x = "Manual RW1", y = "INLA's RW1") +
+  theme_minimal()
+sd_plot <- ggplot() +
+  geom_point(aes(x = res_M$summary.fitted.values$sd, 
+                 y = res_I$summary.fitted.values$sd)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "blue") +
+  labs(title = "Comparison of the standard deviation", x = "Manual RW1", y = "INLA's RW1") +
+  theme_minimal()
+
+comp_plot <- ggarrange(mean_plot, sd_plot, ncol = 2)
+
+#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/RW1_comparison_fig.pdf", comp_plot, width = 8, height = 4, units = "in")
 ```
 From the summaries it is clear they are very similar. However, not exactly equal, as for instance the mean of the Gaussian precision. This is supported by the plots of the means and standard deviations, which show that they are almost the same, but clearly not identical. We also note that the run-time for the manual model is much longer than the one implemented by INLA, so I will use INLA's predefined model from here on out for better computational times.
-
-Lets compare the two RW1 models to ensure they are the same.
-```{r}
-#The INLA formula for a latent model with intercept and user defined RW1
-formula_M <- y ~ f(time, model = RW1_model, 
-                extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0)) +
-  f(us, model = "iid")
-res_M <- inla(formula_M, family = "gaussian", data = NSG_data)
-
-#The INLA formula for a latent model with intercept and user defined RW1 model 2
-formula_I <- y ~ f(time, model = RW1_model2, 
-                extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0)) +
-  f(us, model = "iid")
-res_I <- inla(formula_I, family = "gaussian", data = NSG_data)
-
-summary(res_M)
-summary(res_I)
-
-#plots to compare the model output
-plot(res_M$summary.fitted.values$mean, res_I$summary.fitted.values$mean, 
-     main = "Comparison of the mean", xlab = "Manual RW1", ylab = "INlA's RW1")
-abline(0, 1)
-plot(res_M$summary.fitted.values$sd, res_I$summary.fitted.values$sd, 
-     main = "Comparison of the standard deviation", xlab = "Manual RW1", ylab = "INlA's RW1")
-abline(0, 1)
-```
-
-It runs when i dont use ginv in the rgeneric definition, but why does it fail with ginv when it works with toeplitz? 
 
 
 ### Implementing the adaptive RW1
