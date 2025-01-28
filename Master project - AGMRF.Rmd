@@ -1244,7 +1244,7 @@ colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formul
 ```
 
 
-#Comparing the models for RW1
+#Comparing the models for RW1 - checks the standard prior
 ```{r}
 formula_RW1_g <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.00005))))  + f(us, model = "iid")
 
@@ -1269,7 +1269,7 @@ abline(0, 1)
 
 ```
 
-#Comparing the models for ARW1
+#Comparing the models for ARW1 - pass the R-matrices or not
 
 The rgeneric without passing the R's as arguments.
 ```{r}
@@ -1377,6 +1377,7 @@ res_ARW1_f$cpu.used
 res_ARW1_s$cpu.used
 #print(res_ARW1_f$)
 ```
+We see that it is slightly faster when passing the matrices, but not by a lot.
 
 ## Comparing models with $mean = 0$ with and without additional sum-to-zero constaint for components
 
@@ -1442,7 +1443,7 @@ plot(res_ARW1_free$summary.fitted.values$sd, res_ARW1_cons$summary.fitted.values
      main = "Comparison of the standard deviation", xlab = "Cons ARW1 with free iid", ylab = "Cons ARW1 and cons iid")
 abline(0, 1)
 ```
-Here we see that they are clearly quite different, both for mean and standard deviation. This means that the ARW1 model does not automatically satisfy the sum-to-zero constraint, and that we need to add it, so what does mean = numeric(0) do?
+Here we see that they are clearly quite different, both for mean and standard deviation. This means that the ARW1 model does not automatically satisfy the sum-to-zero constraint, and that we need to add it.
 
 
 #RW1 greier
@@ -1563,73 +1564,6 @@ test_function3 <- function(formula, df, Prec) {
 }
 res3 <- test_function3(formula_RW1, test_data, 3)
 summary(res3)
-
-formula_RW1 <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
-inla.doc("rw1")
-
-P_inv = 75
-res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
-                    control.compute = list(cpo = TRUE), 
-                    control.family = list(hyper = list(prec = 
-                                    list(initial = log(1), fixed = TRUE))),
-                scale = P_inv)
-summary(res_RW1)
-res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
-                     control.compute = list(cpo = TRUE),
-                     control.family = list(hyper = list(prec = 
-                                    list(initial = log(1), fixed = TRUE))),
-                 scale = P_inv)
-
-res_ARW1$summary.random$time
-res_ARW1$summary.fitted.values$mean- res_ARW1$summary.random$us$mean
-
-plotting_df <- data.frame(matrix(c(res_RW1$summary.fitted.values$mean, res_ARW1$summary.fitted.values$mean, df[, i]), ncol = 3, nrow = N))
-colnames(plotting_df) <- c("RW1", "ARW1", "Data")
-plot_realizations(plotting_df, "Comparison for Wakefield with flat mean")
-
-df <- data_w_delta_300_NCT[[1]]
-i <- 1
-
-test_data <- df[, c(i, n + 1, n + 2)] #gets the i-th realization + time
-colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
-
-res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
-                    control.compute = list(cpo = TRUE), 
-                    control.family = list(hyper = list(prec = 
-                                    list(initial = log(1), fixed = TRUE))),
-                scale = 300)
-res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
-                     control.compute = list(cpo = TRUE),
-                     control.family = list(hyper = list(prec = 
-                                    list(initial = log(1), fixed = TRUE))),
-                 scale = 300)
-res_ARW1$summary.random$time
-
-plotting_df <- data.frame(matrix(c(res_RW1$summary.fitted.values$mean, res_ARW1$summary.fitted.values$mean, df[, i]), ncol = 3, nrow = N))
-colnames(plotting_df) <- c("RW1", "ARW1", "Data")
-plot_realizations(plotting_df, "Comparison for Wakefield with delta mean")
-
-df <- data_w_triangle_300_NCT[[1]]
-i <- 1
-
-test_data <- df[, c(i, n + 1, n + 2)] #gets the i-th realization + time
-colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
-
-res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
-                    control.compute = list(cpo = TRUE), 
-                    control.family = list(hyper = list(prec = 
-                                    list(initial = log(1), fixed = TRUE))),
-                scale = 300)
-res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
-                     control.compute = list(cpo = TRUE),
-                     control.family = list(hyper = list(prec = 
-                                    list(initial = log(1), fixed = TRUE))),
-                 scale = 1)
-
-plotting_df <- data.frame(matrix(c(res_RW1$summary.fitted.values$mean, res_ARW1$summary.fitted.values$"0.025quant", res_ARW1$summary.fitted.values$"0.975quant", res_ARW1$summary.fitted.values$mean, df[, i]), ncol = 5, nrow = N))
-colnames(plotting_df) <- c("RW1", "0.025", "0.975", "ARW1", "Data")
-plot_realizations(plotting_df, "Comparison for Wakefield with triangle mean")
-
 ```
 
 

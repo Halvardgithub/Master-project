@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 N <- 30
 conf_years <- c(9, 10, 11, 12, 13, 14, 15)
-prior_str <- "Gamma0,005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
 if(prior_str == "Gamma0,00005"){
   formula_RW1 <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
 } else if(prior_str == "Gamma0,005"){
