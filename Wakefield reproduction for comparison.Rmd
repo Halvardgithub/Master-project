@@ -13,13 +13,13 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 N <- 30
 conf_years <- c(9, 10, 11, 12, 13, 14, 15)
-prior_str <- "PC" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+prior_str <- "Gamma0,00005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
 if(prior_str == "Gamma0,00005"){
-  formula_RW1 <- y ~ f(time, model = "rw1")  + f(us, model = "iid")
+  formula_RW1 <- y ~ f(time, model = "rw1", scale.model = T)  + f(us, model = "iid")
 } else if(prior_str == "Gamma0,005"){
-  formula_RW1 <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
+  formula_RW1 <- y ~ f(time, model = "rw1", scale.model = T, hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))  + f(us, model = "iid")
 } else{
-  formula_RW1 <- y ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
+  formula_RW1 <- y ~ f(time, model = "rw1", scale.model = T, hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
 }
 
 
@@ -62,12 +62,8 @@ mod_eval_W <- function(df, mean = "", V = "", P, tau = "") {
      #save(res_ARW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/ARW1/fit_W_", mean, "_", P, "_", tau, "_", i))
   }
   
-  save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results2/eval_df_", mean, "_", P, "_", tau))
+  save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results3/eval_df_", mean, "_", P, "_", tau))
   #save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", prior_str, "/eval_df_", mean, "_", P, "_", tau))
-  
-  #plot_RMSE <- myboxplot2(eval_df[, c("RMSE_RW1", "RMSE_ARW1")], mean, V)
-  #plot_LS <- myboxplot2(eval_df[, c("LS_RW1", "LS_ARW1")], mean, V)
-  #return(list(RMSE = plot_RMSE, LS = plot_LS))
   return()
 }
 
@@ -79,6 +75,39 @@ mod_eval_W <- function(df, mean = "", V = "", P, tau = "") {
 #load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Results_W/eval_df_flat_150_CT")
 #eval_df
 ```
+
+```{r}
+# mod_eval_W_testing <- function(df_y, df_eta, P) {
+#   
+#   eval_df <- data.frame(matrix(NA, nrow = 1, ncol = 4))
+#   colnames(eval_df) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
+# 
+#   
+#   test_data <- df_y
+#   colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
+#   
+#   res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
+#                   control.compute = list(cpo = TRUE), 
+#                   control.family = list(hyper = list(prec = 
+#                                   list(initial = log(P), fixed = TRUE))))
+#   LS_RW1 <- -mean(log(res_RW1$cpo$cpo))
+#   RMSE_RW1 <- RMSE(df_eta[, 1], res_RW1$summary.fitted.values$mean)
+#   
+#   res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
+#                    control.compute = list(cpo = TRUE),
+#                    control.family = list(hyper = list(prec = 
+#                                   list(initial = log(P), fixed = TRUE))))
+#   LS_ARW1 <- -mean(log(res_ARW1$cpo$cpo))
+#   RMSE_ARW1 <- RMSE(df_eta[, 1], res_ARW1$summary.fitted.values$mean)
+#   
+#   eval_df[1, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
+#   
+#   return(list(eval_df, res_RW1, res_ARW1))
+# }
+# 
+# result <- mod_eval_W_testing(data_w_flat_75_CT[[1]][, c(1, 101, 102)], data_w_flat_75_CT[[2]][, 1], 75)
+```
+
 
 ```{r}
 f_75_CT <- mod_eval_W(data_w_flat_75_CT, "flat", "1/75", 75, "CT")
@@ -117,7 +146,7 @@ taus <- c("CT", "NCT")
 for(m in 1:length(means)){
   for(p in 1:length(precs)){
     for(t in 1:length(taus)){
-      load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results2/eval_df_", means[m], "_", precs[p], "_", taus[t]))
+      load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results3/eval_df_", means[m], "_", precs[p], "_", taus[t]))
       index_str <- paste0("_", means[m], "_", precs[p], "_", taus[t])
       colnames(eval_df) <- c(paste0("RMSE_RW1", index_str), paste0("LS_RW1", index_str), paste0("RMSE_ARW1", index_str), paste0("LS_ARW1", index_str))
       if(m == 1 & p == 1 & t == 1){
@@ -129,7 +158,7 @@ for(m in 1:length(means)){
     }
   }
 }
-save(full_eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str,"/Results2/full_eval_df"))
+save(full_eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str,"/Results3/full_eval_df"))
 ```
 
 Now we need to summarise this information in some plots, and as in the article we will use boxplots for the nine subcases which all have either constant tau or non-constant tau.
@@ -190,7 +219,7 @@ make_full_box_plot <- function(df, criteria, tau, prior){
   
   plot_w_title <- annotate_figure(plot, top = textGrob(title, gp = (gpar(fontsize = 17))))
   
-  ggsave(filename = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Box-plots/", criteria, "_", tau, "_", prior, ".pdf"), plot = plot_w_title, width = 8, height = 7, units = "in")
+  ggsave(filename = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Box-plots2/", criteria, "_", tau, "_", prior, ".pdf"), plot = plot_w_title, width = 8, height = 7, units = "in")
   return(plot_w_title)
 }
 ```

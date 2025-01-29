@@ -238,25 +238,18 @@ DR20_24$deaths <- as.integer(DR20_24$deaths)
 #P <- 1000000000
 
 
-prior_str <- "Gamma0,005" # alternatives are Gamma0,005 and Gamma0,00005 and PC
-family <- "poisson"
+prior_str <- "Gamma0,00005" # alternatives are Gamma0,005 and Gamma0,00005 and PC
+family <- "nbinomial"
+title <- "With a Gamma(1, 0.00005) prior and a negative binomial likelihood"
 
 if(prior_str == "Gamma0,00005"){
-  formula_RW1 <- deaths ~ f(time, model = "rw1")#  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1", scale.model = T)
 } else if(prior_str == "Gamma0,005"){
-  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))#  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1", scale.model = T, hyper = list(prec = list(prior = "loggamma", param = c(1, 0.005))))
 } else{
-  formula_RW1 <- deaths ~ f(time, model = "rw1", hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))#  + f(us, model = "iid")
+  formula_RW1 <- deaths ~ f(time, model = "rw1", scale.model = T, hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))
 }
 
-# res_RW1 <- inla(formula_RW1, family = "gaussian", data = DR20_24, 
-#                     control.compute = list(cpo = TRUE), 
-#                     control.family = list(hyper = list(prec = 
-#                                     list(initial = log(P), fixed = TRUE))))
-
-#summary(res_RW1)
-
-#the poisson model
 res_RW1 <- inla(formula_RW1, family = family, E = population , data = DR20_24,
            control.compute = list(cpo = TRUE))
 
@@ -272,16 +265,8 @@ ARW1 <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model,
                       N = N, conflict_years = S, prior_str = prior_str)
 
 formula_ARW1 <- deaths ~ f(time, model = ARW1, extraconstr = 
-                  list(A = matrix(1, nrow = 1, ncol = N), e = 0))#  + f(us, model = "iid")
+                  list(A = matrix(1, nrow = 1, ncol = N), e = 0))
 
-# res_ARW1 <- inla(formula_ARW1, family = "gaussian", data = DR20_24, 
-#                     control.compute = list(cpo = TRUE), 
-#                     control.family = list(hyper = list(prec = 
-#                                     list(initial = log(P), fixed = TRUE))))
-
-#summary(res_ARW1)
-
-#the poisson model
 res_ARW1 <- inla(formula_ARW1, family = family, E = population , data = DR20_24,
            control.compute = list(cpo = TRUE))
 
@@ -295,15 +280,7 @@ ARW1_3tau <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model_3tau,
                 N = N, conflict_years1 = S_flu, conflict_years2 = S_WW2, prior_str = prior_str)
 
 formula_ARW1_3tau <- deaths ~ f(time, model = ARW1_3tau, extraconstr = 
-                    list(A = matrix(1, nrow = 1, ncol = N), e = 0))#  + f(us, model = "iid")
-
-# res_ARW1_3tau <- inla(formula_ARW1_3tau, family = "gaussian", data = DR20_24, 
-#                     control.compute = list(cpo = TRUE), 
-#                     control.family = list(hyper = list(prec = 
-#                                     list(initial = log(P), fixed = TRUE))))
-
-#summary(res_ARW1_3tau)
-#summary(res_RW1)
+                    list(A = matrix(1, nrow = 1, ncol = N), e = 0))
 
 #the poisson model
 res_ARW1_3tau <- inla(formula_ARW1_3tau, family = family, E = population , data = DR20_24,
@@ -327,10 +304,6 @@ plot_20_RW1 <- ggplot(df, aes(Year)) +
       labs(x = "Year", y = "Death rate") +
       theme(legend.position = "none") +
       annotate("text", x = 1960, y = max(df$death_rate), label = "RW1",size = 5)
-
-#de to er like
-#res_RW1$summary.fitted.values$mean
-#res_RW1$summary.linear.predictor$mean
 
 df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1$summary.fitted.values$mean, lower = res_ARW1$summary.fitted.values$'0.025quant',
             upper = res_ARW1$summary.fitted.values$'0.975quant'))
@@ -371,19 +344,61 @@ data <- data.frame(Method = c("RW1", "ARW1", "ARW1_3tau"), RMSE = RMSE, LS = LS)
 
 ss <- tableGrob(data)
 
-result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob("With a Gamma(1, 0.005) prior and a Poisson likelihood", gp = (gpar(fontsize = 15))))
+result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob(title, gp = (gpar(fontsize = 15))))
 
 
-#ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots2/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
 
-#ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots2/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
 
 
-#INLA::inla.doc("poisson likelihood")
+#-----------------------------------------------------------------------------------
 
-#res_ARW1$cpo$failure
+
+#plotting
+df <- cbind(DR20_24, data.frame(eta = res_RW1$summary.random$time$mean, lower = res_RW1$summary.random$time$'0.025quant',
+            upper = res_RW1$summary.random$time$'0.975quant'))
+
+plot_20_RW1 <- ggplot(df, aes(Year)) + 
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
+      geom_line(aes(y = eta), color = "blue") +
+      labs(x = "Year", y = "y") +
+      theme(legend.position = "none") +
+      annotate("text", x = 1960, y = max(df$upper), label = "RW1",size = 5)
+
+df <- cbind(DR20_24, data.frame(eta = res_ARW1$summary.random$time$mean, lower = res_ARW1$summary.random$time$'0.025quant',
+            upper = res_ARW1$summary.random$time$'0.975quant'))
+
+plot_20_ARW1 <- ggplot(df, aes(Year)) + 
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
+      geom_line(aes(y = eta), color = "blue") +  
+      labs(x = "Year", y = "y") +
+      theme(legend.position = "none") +
+      annotate("text", x = 1960, y = max(df$upper), label = "ARW1",size = 5)
+
+df <- cbind(DR20_24, data.frame(eta = res_ARW1_3tau$summary.random$time$mean, lower = res_ARW1_3tau$summary.random$time$'0.025quant',
+            upper = res_ARW1_3tau$summary.random$time$'0.975quant'))
+
+plot_20_ARW1_3tau <- ggplot(df, aes(Year)) + 
+      geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
+      geom_line(aes(y = eta), color = "blue") +  
+      labs(x = "Year", y = "y") +
+      theme(legend.position = "none") + 
+      annotate("text", x = 1960, y = max(df$upper), label = "ARW1_3tau",size = 5)
+
+#make all the three plots together
+
+result_plot2 <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob(title, gp = (gpar(fontsize = 15))))
+
+
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots2/xPlot", family, "_", prior_str, ".pdf"), plot = result_plot2, height = 15, width = 8, units = "in")
 ```
 
+```
+
+
+
+#testing and random stuff
 ```{r}
 library(ggplot2)
 library(dplyr)
