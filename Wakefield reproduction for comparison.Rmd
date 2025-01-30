@@ -226,19 +226,19 @@ make_full_box_plot <- function(df, criteria, tau, prior){
 
 Making and saving the plots.
 ```{r}
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Results2/full_eval_df")
+load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Results3/full_eval_df")
 make_full_box_plot(full_eval_df, "RMSE", "CT", "Gamma0,00005")
 make_full_box_plot(full_eval_df, "LS", "CT", "Gamma0,00005")
 make_full_box_plot(full_eval_df, "RMSE", "NCT", "Gamma0,00005")
 make_full_box_plot(full_eval_df, "LS", "NCT", "Gamma0,00005")
 
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,005/Results2/full_eval_df")
+load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,005/Results3/full_eval_df")
 make_full_box_plot(full_eval_df, "RMSE", "CT", "Gamma0,005")
 make_full_box_plot(full_eval_df, "LS", "CT", "Gamma0,005")
 make_full_box_plot(full_eval_df, "RMSE", "NCT", "Gamma0,005")
 make_full_box_plot(full_eval_df, "LS", "NCT", "Gamma0,005")
 
-load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/PC/Results2/full_eval_df")
+load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/PC/Results3/full_eval_df")
 make_full_box_plot(full_eval_df, "RMSE", "CT", "PC")
 make_full_box_plot(full_eval_df, "LS", "CT", "PC")
 make_full_box_plot(full_eval_df, "RMSE", "NCT", "PC")

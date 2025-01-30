@@ -854,8 +854,9 @@ sim_dataframe_Wakefield <- function(n, mu, V, tau1 = 20, tau2 = 20, seed = 64) {
   df_y <- data.frame(matrix(0, nrow = length(mu), ncol = n))
   df_eta <- data.frame(matrix(0, nrow = length(mu), ncol = n))
   for (i in 1:n) {
-    df_y[, i] <- sim_data_Wakefield(mu, V, tau1 = tau1, tau2 = tau2)[[1]]
-    df_eta[, i] <- sim_data_Wakefield(mu, V, tau1 = tau1, tau2 = tau2)[[2]]
+    sim_data <- sim_data_Wakefield(mu, V, tau1 = tau1, tau2 = tau2)
+    df_y[, i] <- sim_data[[1]]
+    df_eta[, i] <- sim_data[[2]]
   }
   df_y$t <- 1:length(mu)
   df_y$us <- 1:length(mu)
