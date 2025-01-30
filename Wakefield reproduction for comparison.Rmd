@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 N <- 30
 conf_years <- c(9, 10, 11, 12, 13, 14, 15)
-prior_str <- "Gamma0,00005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
+prior_str <- "Gamma0,005" #other alternatives are Gamma0,005 and Gamma0,00005 and PC
 if(prior_str == "Gamma0,00005"){
   formula_RW1 <- y ~ f(time, model = "rw1", scale.model = T)  + f(us, model = "iid")
 } else if(prior_str == "Gamma0,005"){
@@ -56,56 +56,12 @@ mod_eval_W <- function(df, mean = "", V = "", P, tau = "") {
     RMSE_ARW1 <- RMSE(df_eta[, i], res_ARW1$summary.fitted.values$mean)
     
     eval_df[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
-    
-    #Saving the fits
-     #save(res_RW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/RW1/fit_W_", mean, "_", P, "_", tau, "_", i))
-     #save(res_ARW1, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Fits_W/ARW1/fit_W_", mean, "_", P, "_", tau, "_", i))
   }
   
   save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/", prior_str, "/Results3/eval_df_", mean, "_", P, "_", tau))
   #save(eval_df, file=paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", prior_str, "/eval_df_", mean, "_", P, "_", tau))
   return()
 }
-
-#example of loading a fit for an ARW1
-#load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Fits_W/ARW1/fit_W_flat_75_CT_3")
-#summary(res_ARW1)
-#load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Results_W/eval_df_flat_75_CT")
-#eval_df
-#load("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Gamma0,00005/Results_W/eval_df_flat_150_CT")
-#eval_df
-```
-
-```{r}
-# mod_eval_W_testing <- function(df_y, df_eta, P) {
-#   
-#   eval_df <- data.frame(matrix(NA, nrow = 1, ncol = 4))
-#   colnames(eval_df) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
-# 
-#   
-#   test_data <- df_y
-#   colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
-#   
-#   res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data, 
-#                   control.compute = list(cpo = TRUE), 
-#                   control.family = list(hyper = list(prec = 
-#                                   list(initial = log(P), fixed = TRUE))))
-#   LS_RW1 <- -mean(log(res_RW1$cpo$cpo))
-#   RMSE_RW1 <- RMSE(df_eta[, 1], res_RW1$summary.fitted.values$mean)
-#   
-#   res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data,
-#                    control.compute = list(cpo = TRUE),
-#                    control.family = list(hyper = list(prec = 
-#                                   list(initial = log(P), fixed = TRUE))))
-#   LS_ARW1 <- -mean(log(res_ARW1$cpo$cpo))
-#   RMSE_ARW1 <- RMSE(df_eta[, 1], res_ARW1$summary.fitted.values$mean)
-#   
-#   eval_df[1, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
-#   
-#   return(list(eval_df, res_RW1, res_ARW1))
-# }
-# 
-# result <- mod_eval_W_testing(data_w_flat_75_CT[[1]][, c(1, 101, 102)], data_w_flat_75_CT[[2]][, 1], 75)
 ```
 
 

@@ -33,6 +33,7 @@ NorwayData <- cbind(DeathsNorway, PopulationNorway[1:4272, "Total"]) #remove the
 colnames(NorwayData)[6] <- "population"
 
 NorwayData$death_rate <- NorwayData$deaths/NorwayData$population
+NorwayData$death_rate_per_10000 <- NorwayData$death_rate*10000
 
 library(dplyr) #for filter and more
 library(ggplot2)
@@ -52,27 +53,27 @@ col_map[S] <- 1
 DR20_24 <- filter(NorwayData, Age == "20-24") |>
             filter(Year >= 1900 & Year <= 1970)
 
-plot_20 <- ggplot(DR20_24, aes(Year, death_rate, color = factor(col_map))) + 
+plot_20 <- ggplot(DR20_24, aes(Year, death_rate_per_10000, color = factor(col_map))) + 
           geom_point() +
-          labs(x = "Year", y = "Death rate") +
+          labs(x = "Year", y = "Death rate per 10 000") +
           theme(legend.position = "none")
 
 DR60_64 <- filter(NorwayData, Age == "60-64") |>
             filter(Year >= 1900 & Year <= 1970)
 
-plot_60 <- ggplot(DR60_64, aes(Year, death_rate, color = factor(col_map))) + 
+plot_60 <- ggplot(DR60_64, aes(Year, death_rate_per_10000, color = factor(col_map))) + 
           geom_point() +
-          labs(x = "Year", y = "Death rate") +
+          labs(x = "Year", y = "Death rate per 10 000") +
           theme(legend.position = "none")
 
 plot_20_60 <- ggarrange(plot_20, plot_60, ncol = 1)
 
-death_rate_figure <- annotate_figure(plot_20_60, top = textGrob("Death rates for ages 20-24(top) and 60-64(bottom)", gp = (gpar(fontsize = 15))))
+death_rate_figure <- annotate_figure(plot_20_60, top = textGrob("Death rates per 10 000 for ages 20-24(top) and 60-64(bottom)", gp = (gpar(fontsize = 15))))
 
 death_rate_figure
 
 #save the figure
-ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/death_rate_fig.pdf", plot = death_rate_figure, height = 8, width = 8, units = "in")
+ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots3/death_rate_fig.pdf", plot = death_rate_figure, height = 8, width = 8, units = "in")
 ```
 
 # Models 
@@ -235,12 +236,10 @@ inla.rgeneric.AdaptiveRW1.model_3tau = function(
 DR20_24$us <- 1:N #adding columns for the latent models
 DR20_24$time <- 1:N
 DR20_24$deaths <- as.integer(DR20_24$deaths)
-#P <- 1000000000
 
-
-prior_str <- "Gamma0,00005" # alternatives are Gamma0,005 and Gamma0,00005 and PC
-family <- "nbinomial"
-title <- "With a Gamma(1, 0.00005) prior and a negative binomial likelihood"
+prior_str <- "Gamma0,005" # alternatives are Gamma0,00005 and Gamma0,005 and PC
+family <- "Poisson"
+title <- "With a Gamma(1, 0.005) prior and a Poisson likelihood"
 
 if(prior_str == "Gamma0,00005"){
   formula_RW1 <- deaths ~ f(time, model = "rw1", scale.model = T)
@@ -252,8 +251,6 @@ if(prior_str == "Gamma0,00005"){
 
 res_RW1 <- inla(formula_RW1, family = family, E = population , data = DR20_24,
            control.compute = list(cpo = TRUE))
-
-summary(res_RW1)
 ```
 
 
@@ -293,39 +290,40 @@ lets now try and see how well the models fit the data and calculate the RMSE and
 ```{r}
 library(grid)
 
+C <- 10000
 #plotting
-df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_RW1$summary.fitted.values$mean, lower = res_RW1$summary.fitted.values$'0.025quant',
-            upper = res_RW1$summary.fitted.values$'0.975quant'))
+df <- cbind(DR20_24[, c("Year", "death_rate_per_10000")], data.frame(eta = res_RW1$summary.fitted.values$mean *C, lower = res_RW1$summary.fitted.values$'0.025quant' *C,
+            upper = res_RW1$summary.fitted.values$'0.975quant' *C))
 
 plot_20_RW1 <- ggplot(df, aes(Year)) + 
       geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
-      geom_point(aes(y = death_rate, color = factor(col_map))) +
+      geom_point(aes(y = death_rate_per_10000, color = factor(col_map))) +
       geom_line(aes(y = eta), color = "blue") +  
-      labs(x = "Year", y = "Death rate") +
+      labs(x = "Year", y = "Death rate per 10 000") +
       theme(legend.position = "none") +
-      annotate("text", x = 1960, y = max(df$death_rate), label = "RW1",size = 5)
+      annotate("text", x = 1960, y = max(df$death_rate), label = "RW1",size = 7)
 
-df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1$summary.fitted.values$mean, lower = res_ARW1$summary.fitted.values$'0.025quant',
-            upper = res_ARW1$summary.fitted.values$'0.975quant'))
+df <- cbind(DR20_24[, c("Year", "death_rate_per_10000")], data.frame(eta = res_ARW1$summary.fitted.values$mean *C, lower = res_ARW1$summary.fitted.values$'0.025quant' *C,
+            upper = res_ARW1$summary.fitted.values$'0.975quant' *C))
 
 plot_20_ARW1 <- ggplot(df, aes(Year)) + 
       geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
-      geom_point(aes(y = death_rate, color = factor(col_map))) +
+      geom_point(aes(y = death_rate_per_10000, color = factor(col_map))) +
       geom_line(aes(y = eta), color = "blue") +  
-      labs(x = "Year", y = "Death rate") +
+      labs(x = "Year", y = "Death rate per 10 000") +
       theme(legend.position = "none") +
-      annotate("text", x = 1960, y = max(df$death_rate), label = "ARW1",size = 5)
+      annotate("text", x = 1960, y = max(df$death_rate), label = "ARW1",size = 7)
 
-df <- cbind(DR20_24[, c("Year", "death_rate")], data.frame(eta = res_ARW1_3tau$summary.fitted.values$mean, lower = res_ARW1_3tau$summary.fitted.values$'0.025quant',
-            upper = res_ARW1_3tau$summary.fitted.values$'0.975quant'))
+df <- cbind(DR20_24[, c("Year", "death_rate_per_10000")], data.frame(eta = res_ARW1_3tau$summary.fitted.values$mean *C, lower = res_ARW1_3tau$summary.fitted.values$'0.025quant' *C,
+            upper = res_ARW1_3tau$summary.fitted.values$'0.975quant' *C))
 
 plot_20_ARW1_3tau <- ggplot(df, aes(Year)) + 
       geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.3, color = "black") +
-      geom_point(aes(y = death_rate, color = factor(col_map))) +
+      geom_point(aes(y = death_rate_per_10000, color = factor(col_map))) +
       geom_line(aes(y = eta), color = "blue") +  
-      labs(x = "Year", y = "Death rate") +
+      labs(x = "Year", y = "Death rate per 10 000") +
       theme(legend.position = "none") + 
-      annotate("text", x = 1960, y = max(df$death_rate), label = "ARW1_3tau",size = 5)
+      annotate("text", x = 1960, y = max(df$death_rate), label = "ARW1_3tau",size = 7)
 
 #make all the three plots together
 
@@ -347,12 +345,12 @@ ss <- tableGrob(data)
 result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob(title, gp = (gpar(fontsize = 15))))
 
 
-ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots2/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots3/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
 
-ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots2/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots3/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
 
 
-#-----------------------------------------------------------------------------------
+#----------------------------------------------------------------------------
 
 
 #plotting
@@ -364,7 +362,7 @@ plot_20_RW1 <- ggplot(df, aes(Year)) +
       geom_line(aes(y = eta), color = "blue") +
       labs(x = "Year", y = "y") +
       theme(legend.position = "none") +
-      annotate("text", x = 1960, y = max(df$upper), label = "RW1",size = 5)
+      annotate("text", x = 1960, y = max(df$upper), label = "RW1",size = 7)
 
 df <- cbind(DR20_24, data.frame(eta = res_ARW1$summary.random$time$mean, lower = res_ARW1$summary.random$time$'0.025quant',
             upper = res_ARW1$summary.random$time$'0.975quant'))
@@ -374,7 +372,7 @@ plot_20_ARW1 <- ggplot(df, aes(Year)) +
       geom_line(aes(y = eta), color = "blue") +  
       labs(x = "Year", y = "y") +
       theme(legend.position = "none") +
-      annotate("text", x = 1960, y = max(df$upper), label = "ARW1",size = 5)
+      annotate("text", x = 1960, y = max(df$upper), label = "ARW1",size = 7)
 
 df <- cbind(DR20_24, data.frame(eta = res_ARW1_3tau$summary.random$time$mean, lower = res_ARW1_3tau$summary.random$time$'0.025quant',
             upper = res_ARW1_3tau$summary.random$time$'0.975quant'))
@@ -384,14 +382,14 @@ plot_20_ARW1_3tau <- ggplot(df, aes(Year)) +
       geom_line(aes(y = eta), color = "blue") +  
       labs(x = "Year", y = "y") +
       theme(legend.position = "none") + 
-      annotate("text", x = 1960, y = max(df$upper), label = "ARW1_3tau",size = 5)
+      annotate("text", x = 1960, y = max(df$upper), label = "ARW1_3tau",size = 7)
 
 #make all the three plots together
 
 result_plot2 <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob(title, gp = (gpar(fontsize = 15))))
 
 
-ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots2/xPlot", family, "_", prior_str, ".pdf"), plot = result_plot2, height = 15, width = 8, units = "in")
+ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots3/xPlot", family, "_", prior_str, ".pdf"), plot = result_plot2, height = 15, width = 8, units = "in")
 ```
 
 ```
