@@ -204,7 +204,7 @@ make_full_box_plot(full_eval_df, "LS", "NCT", "PC")
 
 # Harmonius mean evaluation
 
-first, lets get the data, will use the sim_dataframe_sine from Master project.
+First, lets get the data, will use the sim_dataframe_sine from Master project.
 ```{r}
 #parameters
 N <- 30
@@ -368,7 +368,8 @@ make_full_box_plot <- function(df, criteria, tau, prior){
   else{title <- paste0(title, "non-constant tau and ")}
   title <- paste0(title, prior_name)
   
-  plot_w_title <- annotate_figure(plot, top = text_grob(title))
+  plot_w_title <- annotate_figure(plot, top = textGrob(title, gp = (gpar(fontsize = 17))))
+  
   ggsave(filename = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/Plots/", criteria, "_", tau, "_", prior, ".pdf"), plot = plot_w_title, width = 8, height = 5, units = "in")
   return(plot_w_title)
 }
