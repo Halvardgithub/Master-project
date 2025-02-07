@@ -147,7 +147,6 @@ inla.rgeneric.AdaptiveRW1.model = function(
 }
 ```
 
-
 The more flexible ARW1 with a separate precision for each shock event. Compared to the previous model we need to pass two lists of conflict points, will assume they do not border each other. Need to make three structure matrices, and also have three parameters in interpret theta and for the log.prior. 
 ```{r}
 inla.rgeneric.AdaptiveRW1.model_3tau = function(
@@ -223,9 +222,7 @@ inla.rgeneric.AdaptiveRW1.model_3tau = function(
   vals <- do.call(match.arg(cmd), args = list())
   return(vals)
 }
-
 ```
-
 
 # Fitting the models
 
@@ -257,7 +254,6 @@ res_RW1 <- inla(formula_RW1, family = family, E = population , data = DR20_24,
 ## The adaptive RW1 with 2 total precisions
 
 ```{r}
-
 ARW1 <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
                       N = N, conflict_years = S, prior_str = prior_str)
 
@@ -266,7 +262,6 @@ formula_ARW1 <- deaths ~ f(time, model = ARW1, extraconstr =
 
 res_ARW1 <- inla(formula_ARW1, family = family, E = population , data = DR20_24,
            control.compute = list(cpo = TRUE))
-
 ```
 
 
@@ -285,7 +280,7 @@ res_ARW1_3tau <- inla(formula_ARW1_3tau, family = family, E = population , data 
 ```
 
 ## Show the results with this configuration
-lets now try and see how well the models fit the data and calculate the RMSE and LS.
+Lets now try and see how well the models fit the data and calculate the RMSE and LS.
 
 ```{r}
 library(grid)
@@ -344,11 +339,9 @@ ss <- tableGrob(data)
 
 result_plot <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob(title, gp = (gpar(fontsize = 15))))
 
-
 ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots3/", family, "_", prior_str, ".pdf"), plot = result_plot, height = 15, width = 8, units = "in")
 
 ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots3/", family, "_", prior_str, "_table.pdf"), plot = ss, height = 1.2, width = 3.5, units = "in")
-
 
 #----------------------------------------------------------------------------
 
@@ -388,13 +381,8 @@ plot_20_ARW1_3tau <- ggplot(df, aes(Year)) +
 
 result_plot2 <- grid.arrange(plot_20_RW1, plot_20_ARW1, plot_20_ARW1_3tau, nrow = 3, top = textGrob(title, gp = (gpar(fontsize = 15))))
 
-
 ggsave(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots3/xPlot", family, "_", prior_str, ".pdf"), plot = result_plot2, height = 15, width = 8, units = "in")
 ```
-
-```
-
-
 
 #testing and random stuff
 ```{r}
@@ -425,10 +413,7 @@ ggplot(plot_data, aes(x = x)) +
     title = "Linear Predictor with Uncertainty"
   ) +
   theme_minimal()
-
 ```
-
-
 
 ### Transforming the parameters from the internal theta scale to standard scale
 transforming the marginals for the internal thetas to become precision parameters.
@@ -450,18 +435,7 @@ inla.qmarginal(c(0.025, 0.5, 0.975), inla.tmarginal(exp_func, res_ARW1$marginals
 #for ARW1_3tau
 res_ARW1_3tau$summary.hyperpar
 inla.qmarginal(c(0.025, 0.5, 0.975), inla.tmarginal(exp_func, res_ARW1_3tau$marginals.hyperpar$`Theta1 for time`))
-
-
-
 ```
-
-
-# Maybe try without iid term or different priors, maybe also scale the RW1 if it is not the default
-
-
-
-
-
 
 
 
