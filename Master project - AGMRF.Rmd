@@ -9,7 +9,6 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 ```{r}
 #Libraries
 library(ggplot2) #plotting
@@ -119,7 +118,6 @@ for (i in 1:n){
 # Plot all lines using ggplot
 RW2_plot <- plot_realizations(df2, "RW2 with N=100", legend = FALSE)
 ```
-
 
 Visualize the plots.
 ```{r}
@@ -366,7 +364,6 @@ comp_plot <- ggarrange(mean_plot, sd_plot, ncol = 2)
 ```
 From the summaries it is clear they are very similar. However, not exactly equal, as for instance the mean of the Gaussian precision. This is supported by the plots of the means and standard deviations, which show that they are almost the same, but clearly not identical. We also note that the run-time for the manual model is much longer than the one implemented by INLA, so I will use INLA's predefined model from here on out for better computational times.
 
-
 ### Implementing the adaptive RW1
 We now make the previous model more flexible by allowing for two different precisions in the random walk. The new precision is used for transitions involving conflict years which we define. So, we start by computing the scaled structure matrices R1_star and R2_star which we need as inputs for the adaptive random walk.
 
@@ -535,7 +532,6 @@ inla.rgeneric.AdaptiveRW1.model2 = function(
 We will evaluate the models with root mean square error (RMSE) and average proper logarithmic scoring (LS).
 
 #### Root mean square eroor
-
 A common model criteria is the RMSE. We define a function to calculate this below. The lower RMSE the better.
 
 ```{r}
@@ -543,15 +539,12 @@ RMSE <- function(data, preds){
   return(sqrt( sum((data - preds)**2) / length(data))) #definition of RMSE
 }
 ```
-
 #### Average proper logarithmic scoring rule
-
 From a paper by Gneiting and Raftery (2007). 
 $$
 \text{LS}(p, \omega) = \text{log}p(\omega)
 $$
 where $p$ is the predicted distribution of a point, which we get from INLA, and $\omega$ is the observed value, which is the specific datapoint. We then take the average of the score for all the data points. The higher average proper LS the better.
-
 
 # Recreating the simulations study by Wakefield and Aleshin-Guendel
 Their simulation study compares a standard RW1 with an adaptive RW1 with an extra precision parameter for some timepoints where we expect a shock. They look at three different means in the latent layer, namely flat, delta and triangle. The latent layer is $\eta_i = \mu_i + b_i$ where $b_i \sim N(0, \tau_i^{-1})$ for some precision $\tau_i$. The observation layer is then $y_i | \eta_i \sim N(\eta_i, V)$ for some variance $V$.They choose $V$ to be $1/75$, $1/150$ or $1/300$. $\tau_i$ is either $20$ for all points or $10$ for the conflict points, which are $9-15$ out of the $N=30$ timepoints. They then combine and evaluate the model in all these cases. Lets start my creating and plotting the means in the latent layers.
@@ -652,128 +645,6 @@ data_w_triangle_150_NCT <- sim_dataframe_Wakefield(n, mean_triangle, 1/150, tau2
 data_w_triangle_300_NCT <- sim_dataframe_Wakefield(n, mean_triangle, 1/300, tau2 = 10)
 ```
 
-As we now use $N=30$ timepoints, we also have to define the ARW1 model with the corresponding scaled structure matrix.
-```{r}
-#Parameters also defined further up
-N <- 30
-conf_years <- c(9, 10, 11, 12, 13, 14, 15)
-#R_star_list_W <- Scaled_structure_matrices_for_ARW1(N, conf_years)
-R_star_list_W <- Scaled_structure_matrices_for_ARW1(N, 1)
-ARW1_model_W <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model, 
-                                  N = N, R_star_list = R_star_list_W, prior_str = "default")
-formula_ARW1_W <- y ~ f(time, model = ARW1_model_W,
-                extraconstr = list(A = matrix(1, nrow = 1, ncol = N), e = 0)) +
-                f(us, model = "iid")
-```
-
-
-Model evaluation
-```{r}
-myboxplot2 <- function(df, mean, V){
-  colnames(df) <- c("RW1", "ARW1")
-  # Reshape data to long format
-  df_long <- df %>%
-    pivot_longer(cols = everything(), names_to = "Category", values_to = "Value")
-  
-  # Create the boxplot
-  eval_plot <- ggplot(df_long, aes(x = Category, y = Value, fill = Category)) +
-    geom_boxplot() +
-    ggtitle(paste("Mu: ", mean, ", V: ", V)) + xlab("") + ylab("") +
-    theme(legend.position = "none") +
-    scale_fill_manual(values = c("RW1" = "skyblue", "ARW1" = "orange"))
-  return(eval_plot)
-}
-
-mod_eval_W <- function(df, mean = "", V = "") {
-  df <- df[[1]] #just for now so the code still works
-  n <- dim(df)[2] - 2
-  
-  eval_df <- data.frame(matrix(NA, nrow = n, ncol = 4))
-  colnames(eval_df) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
-
-  for(i in 1:n){#iterate over each simulated realization
-    test_data <- df[, c(i, n + 1, n + 2)] #gets the i-th realization + time
-    colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
-    
-    res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data)
-    LS_RW1 <- average_proper_LS(res_RW1, df[, i])
-    RMSE_RW1 <- RMSE(df[, i], res_RW1$summary.fitted.values$mean )
-    
-    res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data)
-    LS_ARW1 <- average_proper_LS(res_ARW1, df[, i])
-    RMSE_ARW1 <- RMSE(df[, i], res_ARW1$summary.fitted.values$mean )
-    
-    eval_df[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
-  }
-  
-  plot_RMSE <- myboxplot2(eval_df[, c("RMSE_RW1", "RMSE_ARW1")], mean, V)
-  plot_LS <- myboxplot2(eval_df[, c("LS_RW1", "LS_ARW1")], mean, V)
-  
-  return(list(RMSE = plot_RMSE, LS = plot_LS))
-}
-```
-
-Doing the model evaluation.
-```{r, eval=FALSE}
-#Data with constant tau
-f_75_CT <- mod_eval_W(data_w_flat_75_CT, "flat", "1/75")
-f_150_CT <- mod_eval_W(data_w_flat_150_CT, "flat", "1/150")
-f_300_CT <- mod_eval_W(data_w_flat_300_CT, "flat", "1/300")
-
-d_75_CT <- mod_eval_W(data_w_delta_75_CT, "delta", "1/75")
-d_150_CT <- mod_eval_W(data_w_delta_150_CT, "delta", "1/150")
-d_300_CT <- mod_eval_W(data_w_delta_300_CT, "delta", "1/300")
-
-t_75_CT <- mod_eval_W(data_w_triangle_75_CT, "triangle", "1/75")
-t_150_CT <- mod_eval_W(data_w_triangle_150_CT, "triangle", "1/150")
-t_300_CT <- mod_eval_W(data_w_triangle_300_CT, "triangle", "1/300")
-
-#making the 3x3 boxplots
-plot_eval_CT_W_RMSE <- ggarrange(f_75_CT$RMSE, f_150_CT$RMSE, f_300_CT$RMSE,
-                                 d_75_CT$RMSE, d_150_CT$RMSE, d_300_CT$RMSE,
-                                 t_75_CT$RMSE, t_150_CT$RMSE, t_300_CT$RMSE,
-                                 ncol = 3, nrow = 3)
-annotate_figure(plot_eval_CT_W_RMSE, 
-                top = text_grob("RMSE for non-shocked Wakefield data")) 
-
-plot_eval_CT_W_LS <- ggarrange(f_75_CT$LS, f_150_CT$LS, f_300_CT$LS,
-                               d_75_CT$LS, d_150_CT$LS, d_300_CT$LS,
-                               t_75_CT$LS, t_150_CT$LS, t_300_CT$LS, 
-                               ncol = 3, nrow = 3)
-annotate_figure(plot_eval_CT_W_LS, 
-                top = text_grob("LS for non-shocked Wakefield data")) 
-
-#Data with non-constant tau
-f_75_NCT <- mod_eval_W(data_w_flat_75_NCT, "flat", "1/75")
-f_150_NCT <- mod_eval_W(data_w_flat_150_NCT, "flat", "1/150")
-f_300_NCT <- mod_eval_W(data_w_flat_300_NCT, "flat", "1/300")
-
-d_75_NCT <- mod_eval_W(data_w_delta_75_NCT, "delta", "1/75")
-d_150_NCT <- mod_eval_W(data_w_delta_150_NCT, "delta", "1/150")
-d_300_NCT <- mod_eval_W(data_w_delta_300_NCT, "delta", "1/300")
-
-t_75_NCT <- mod_eval_W(data_w_triangle_75_NCT, "triangle", "1/75")
-t_150_NCT <- mod_eval_W(data_w_triangle_150_NCT, "triangle", "1/150")
-t_300_NCT <- mod_eval_W(data_w_triangle_300_NCT, "triangle", "1/300")
-
-#Making the 3x3 boxplots
-plot_eval_NCT_W_RMSE <- ggarrange(f_75_NCT$RMSE, f_150_NCT$RMSE, f_300_NCT$RMSE,
-                                d_75_NCT$RMSE, d_150_NCT$RMSE, d_300_NCT$RMSE,
-                                t_75_NCT$RMSE, t_150_NCT$RMSE, t_300_NCT$RMSE, 
-                                ncol = 3, nrow = 3)
-annotate_figure(plot_eval_NCT_W_RMSE, 
-                top = text_grob("RMSE for shocked Wakefield data")) 
-
-plot_eval_NCT_W_LS <- ggarrange(f_75_NCT$LS, f_150_NCT$LS, f_300_NCT$LS,
-                                d_75_NCT$LS, d_150_NCT$LS, d_300_NCT$LS,
-                                t_75_NCT$LS, t_150_NCT$LS, t_300_NCT$LS, 
-                                ncol = 3, nrow = 3)
-annotate_figure(plot_eval_NCT_W_LS, 
-                top = text_grob("LS for shocked Wakefield data"))
-```
-
-Worth noting that their model also includes an iid normal latent term, so an unstructured random effect, in both the RW1 and the ARW1. 
-
 # Harmonious mean
 Another similar situation is when the mean is a harmonious function, say some sine function, and we again impose some offset for a subset of the time values. 
 ```{r, eval=FALSE}
@@ -809,15 +680,6 @@ sim_dataframe_sine <- function(n, mu, V, tau1, tau2, o, seed = 64) {
   df_y$us <- 1:length(mu)
   return(list(df_y, df_eta))
 }
-  #data_W <- list(df_y, df_eta)
-  #save(data_W, file = paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Wakefield-data/Data_W/data_W_", mean_str, "_", V_str, "_", T_str))
-
-# sim_data_Wakefield <- function(mu, V, tau1 = 20, tau2 = 20) {
-#   eta <- mu + c(rnorm(8, sd = sqrt(1/tau1)), rnorm(7, sd = sqrt(1/tau2)), 
-#                 rnorm(15, sd = sqrt(1/tau1)))
-#   y <- rnorm(length(mu), mean = eta, sd = sqrt(V))
-#   return(list(y, eta)) #[[1]] gives y and [[2]] gives eta
-# }
 
 df_sine_S <- sim_dataframe_sine(n, mean_sine, V, tau1, tau2, o)[[1]]
 
@@ -825,9 +687,7 @@ df_sine_NS <- sim_dataframe_sine(n, mean_sine, V, tau1, tau2, 0)[[1]]
 
 plot_realizations(df_sine_NS[, 1:5], "Five realisations witout shock",, legend = FALSE)
 plot_realizations(df_sine_S[, 1:5], "Five realisations with shock at 9-15", legend =FALSE)
-
 ```
-Now we have the data, lets perform the model evaluation with RMSE and LS.
 
 Making the plot for the means.
 ```{r}
@@ -852,77 +712,13 @@ plot_triangle <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X5), color = "black
 plot_sine <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X8), color = "black") + geom_point(aes(y = X9), color = "red") + labs(title="Sine", x = "t", y = "y") + ylim(ymin_sine, ymax_sine)
 plot_sine_offset <- ggplot(df, aes(x = X7)) + geom_line(aes(y = X10), color = "black") + geom_point(aes(y = X11), color = "red") + labs(title="Offset sine", x = "t", y = "") + ylim(ymin_sine, ymax_sine)
 
-
 mean_plot <- ggarrange(plot_flat, plot_delta, plot_triangle, plot_sine, plot_sine_offset, nrow = 2, ncol = 3)
 
 mean_figure <- annotate_figure(mean_plot, top = textGrob("The mean structures and a realisation", gp = (gpar(fontsize = 15))))
 
 #save the figure
-ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/mean_plot.pdf", plot = mean_figure, height = 8, width = 10, units = "in")
-
-
+#ggsave("C:/Users/Halvard/Documents/GitHub/Master-project/HMD-plots/mean_plot.pdf", plot = mean_figure, height = 8, width = 10, units = "in")
 ```
-
-
-```{r, eval=FALSE}
-#model evaluation
-
-myboxplot3 <- function(df, title, criteria){
-  # Reshape data to long format
-  df_long <- df %>%
-    pivot_longer(cols = everything(), names_to = "Category", values_to = "Value")
-  
-  # Create the boxplot
-  eval_plot <- ggplot(df_long, aes(x = Category, y = Value, fill = Category)) +
-    geom_boxplot() +
-    labs(title = title,x = "", y = criteria) + 
-    theme(legend.position = "none") +
-    scale_fill_manual(values = c("RW1" = "skyblue", "ARW1" = "orange"))
-  return(eval_plot)
-}
-
-mod_eval_sine <- function(df){
-  n <- dim(df)[2] - 2
-  
-  eval_df <- data.frame(matrix(NA, nrow = n, ncol = 4))
-  colnames(eval_df) <- c("RMSE_RW1", "LS_RW1", "RMSE_ARW1", "LS_ARW1")
-
-  for(i in 1:n){#iterate over each simulated realization
-    test_data <- df[, c(i, n + 1, n + 2)] #gets the i-th realization + time
-    colnames(test_data) <- c("y", "time", "us") #makes the colnames match the formula
-    
-    res_RW1 <- inla(formula_RW1, family = "gaussian", data = test_data)
-    LS_RW1 <- average_proper_LS(res_RW1, df[, i])
-    RMSE_RW1 <- RMSE(df[, i], res_RW1$summary.fitted.values$mean )
-    
-    res_ARW1 <- inla(formula_ARW1_W, family = "gaussian", data = test_data)
-    LS_ARW1 <- average_proper_LS(res_ARW1, df[, i])
-    RMSE_ARW1 <- RMSE(df[, i], res_ARW1$summary.fitted.values$mean )
-    
-    eval_df[i, ] <- c(RMSE_RW1, LS_RW1, RMSE_ARW1, LS_ARW1)
-  }
-  df_RMSE <- eval_df[, c("RMSE_RW1", "RMSE_ARW1")]
-  colnames(df_RMSE) <- c("RW1", "ARW1")
-  
-  df_LS <- eval_df[, c("LS_RW1", "LS_ARW1")]
-  colnames(df_LS) <- c("RW1", "ARW1")
-  
-  plot_RMSE <- myboxplot3(df_RMSE, "", "RMSE")
-  plot_LS <- myboxplot3(df_LS, "", "LS")
-  fig <- ggarrange(plot_RMSE, plot_LS, ncol = 2)
-  return(fig)
-}
-
-plot_sine_NS <- mod_eval_sine(df_sine_NS)
-annotate_figure(plot_sine_NS, 
-                top = text_grob("LS and RMSE for non-shocked sine data"))
-
-plot_sine_S <- mod_eval_sine(df_sine_S)
-annotate_figure(plot_sine_S, 
-                top = text_grob("LS and RMSE for shocked sine data"))
-
-```
-
 
 #Test data
 ```{r}
@@ -1022,10 +818,6 @@ test_function3 <- function(formula, df, Prec) {
 res3 <- test_function3(formula_RW1, test_data, 3)
 summary(res3)
 ```
-
-
-
-
 
 
 
