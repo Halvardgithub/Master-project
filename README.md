@@ -1,5 +1,5 @@
 # Master-project
-The main code is contained in three files, Master project - AGMRF.Rmd, Wakefield reproduction for comparison.Rmd and Application for Norwegian death rates.Rmd. The simulation study uses both Master project - AGMRF.Rmd and Wakefield reproduction for comparison.Rmd while the applied case with Norwegian death rates is contained in Norwegian death rates.Rmd, as well as using some code and fucntions from the first two files. A lot of the code is still a bit messy, but it will reproduce the results presented in my report.
+The report is included as the file Master_project_Halvard - Finished.pdf and the figures and plots are created with the Rmd files in this repository. The code is briefly described below.
 
 ## Master project - AGMRF.Rmd
 Firstly, this file looks at first and second order random walks in time and implements them and make figures. Secondly, there are multiple regeneric definitions both for a RW1 and an adaptive RW1. They also both have definitions where the precision matrix $Q$ is defined inside the rgenric or supplied as an argument. Then follows data generation for all the mean trends and some testing and examples with INLA and the different latent models
