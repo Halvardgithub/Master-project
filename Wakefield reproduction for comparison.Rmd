@@ -9,7 +9,6 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 ```{r}
 N <- 30
 conf_years <- c(9, 10, 11, 12, 13, 14, 15)
@@ -21,7 +20,6 @@ if(prior_str == "Gamma0,00005"){
 } else{
   formula_RW1 <- y ~ f(time, model = "rw1", scale.model = T, hyper = list(prec = list(prior = "pc.prec", param = c(1, 0.01))))  + f(us, model = "iid")
 }
-
 
 ARW1_model <- inla.rgeneric.define(inla.rgeneric.AdaptiveRW1.model2, N = N, conflict_years = conf_years, prior_str = prior_str)
 
@@ -201,7 +199,6 @@ make_full_box_plot(full_eval_df, "RMSE", "NCT", "PC")
 make_full_box_plot(full_eval_df, "LS", "NCT", "PC")
 ```
 
-
 # Harmonius mean evaluation
 
 First, lets get the data, will use the sim_dataframe_sine from Master project.
@@ -211,7 +208,6 @@ N <- 30
 n <- 100
 tau1 <- 20 #latent precision in the iid noise
 tau2 <- 10
-o <- 1 # the offset for points 9-15
 
 t <- 1:N
 mean_sine <- sin(pi*t/15)
@@ -278,8 +274,6 @@ sh_150_NCT <- mod_eval_W(data_w_sHarm_150_NCT, "sHarm", "1/150", 150, "NCT")
 sh_300_NCT <- mod_eval_W(data_w_sHarm_300_NCT, "sHarm", "1/300", 300, "NCT")
 
 #load(paste0("C:/Users/Halvard/Documents/GitHub/Master-project/Harmonius-data/", "Gamma0,00005", "/eval_df_", "harm", "_", "75", "_", "CT"))
-
-#starta den 16.55
 ```
 
 Now, lets combine all the evaluation criteria together in the same dataframe.
@@ -395,12 +389,6 @@ make_full_box_plot(full_eval_df, "LS", "CT", "PC")
 make_full_box_plot(full_eval_df, "RMSE", "NCT", "PC")
 make_full_box_plot(full_eval_df, "LS", "NCT", "PC")
 ```
-
-
-
-
-
-
 
 
 
